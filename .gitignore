@@ -21,12 +21,31 @@ venv/
 04_episodes/*/raw_render/
 04_episodes/*/output/
 04_episodes/*/*.mp4
+04_episodes/*/*.wav
+04_episodes/*/*.mp3
 04_episodes/*/*.ass
 04_episodes/*/*.blend
+04_episodes/*/*.blend1
 04_episodes/*/timing_manifest.json
+04_episodes/*/storyboard_grid.png
+
+# Heavy binary media / archives / Blender files anywhere in repo (cached in Google Drive)
+*.blend
+*.blend1
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.ogg
+*.hdr
+*.exr
+*.zip
+*.tar.xz
+*.part*
 
 # OS / editor junk
 .DS_Store
 Thumbs.db
 *.tmp
 *.bak
+

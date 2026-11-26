@@ -374,21 +374,24 @@ def main() -> int:
     vo_speed = max(0.5, min(2.0, float(args.vo_speed)))
 
     client = None
-    if not args.dry_run:
+
+    def _ensure_client() -> Any:
+        nonlocal client
+        if client is not None:
+            return client
         api_key = get_gemini_api_key()
         if not api_key:
-            log(
-                "ERROR",
-                "GEMINI_API_KEY tidak ditemukan di environment variable maupun Colab Secrets! "
-                "Set GEMINI_API_KEY terlebih dahulu atau jalankan dengan --dry-run untuk uji offline.",
+            raise RuntimeError(
+                "GEMINI_API_KEY tidak ditemukan di environment variable maupun Colab/Kaggle Secrets! "
+                "Set GEMINI_API_KEY terlebih dahulu, pastikan cache VO sudah ada (--skip-existing), "
+                "atau jalankan dengan --dry-run untuk uji offline."
             )
-            return 1
         try:
             from google import genai
         except ImportError as exc:
-            log("ERROR", f"google-genai SDK belum terinstall (`pip install 'google-genai>=2.24.0'`): {exc}")
-            return 1
+            raise RuntimeError(f"google-genai SDK belum terinstall (`pip install 'google-genai>=2.24.0'`): {exc}") from exc
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
+        return client
 
     log("TTS", f"Episode: {spec['episode_id']} | Primary: {primary_model} | Fallback: {fallback_model} | Voice: {voice_name} | VO Speed: {vo_speed}x")
     log("TTS", f"VO output dir: {vo_dir}")
@@ -418,9 +421,10 @@ def main() -> int:
                 used_model = "dry_run_placeholder"
                 log("TTS", f"[DRY-RUN] Scene {sid:02d} -> {wav_path.name} (raw {target_audio:.2f}s)")
             else:
+                active_client = _ensure_client()
                 log("TTS", f"Generating Scene {sid:02d}: text='{vo_text[:55]}...' | style='{style_prompt[:60]}...'")
                 audio_bytes, used_model = synthesize_scene_with_fallback(
-                    client=client,
+                    client=active_client,
                     primary_model=primary_model,
                     fallback_model=fallback_model,
                     vo_text=vo_text,
@@ -444,7 +448,7 @@ def main() -> int:
         if sid == len(spec["scenes"]):
             scream_offset_sec = round(vo_delay_sec + audio_dur + 0.05, 4)
             cut_to_black_sec = round(scream_offset_sec + 0.35, 4)
-            scene_dur = cut_to_black_sec
+            scene_dur = round(cut_to_black_sec + 0.12, 4)
         else:
             max_sfx_offset = max(
                 (float(c["offset_sec"]) for c in scene.get("sfx_cues", []) if c["sfx_id"] != "human_scream_cut"),

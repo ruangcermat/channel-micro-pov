@@ -1,0 +1,31 @@
+ZACK BLENDER PACK - 3 skills for realistic Zack D Films-style 3D shorts in Blender
+
+The 3 skills in this folder:
+  zack-3d-short.zip         The main one: characters, expressions, sets, voice, captions, Zack-quality checks.
+                            It starts by asking your niche, the video length, and whether you have a script.
+  blender-walk-example.zip  A working example: a character walks, turns and sits (videos included).
+  blender-render-farm.zip   Turns the scene into a real MP4 on free Google Colab, Kaggle, or your own PC.
+
+HOW TO INSTALL (pick one)
+
+A) Claude app / claude.ai
+   Settings -> Capabilities -> Skills -> Upload skill.
+   Upload each of the 3 zips, one at a time.
+
+B) Claude Code (any computer)
+   Download the 3 zips and unzip each one into your skills folder:
+     Windows:   C:\Users\<you>\.claude\skills\
+     Mac/Linux: ~/.claude/skills/
+   You should end up with ...\.claude\skills\zack-3d-short\SKILL.md (and the same for the other two).
+   Restart Claude Code.
+
+   Or just give Claude Code the 3 zips and say:
+   "install these 3 skills into my ~/.claude/skills folder"
+
+HOW TO USE
+   Say "make me a Zack-style 3D short", or type /zack-3d-short
+
+NEEDS (all free)
+   Blender 5.2 with the MPFB extension (in Blender: Edit -> Preferences -> Get Extensions -> search MPFB)
+   Python 3 with pillow, numpy and scipy
+   ffmpeg

@@ -137,8 +137,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: MainSub,DejaVu Sans,58,&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,5,2,2,90,90,380,1
-Style: TopBadge,DejaVu Sans,46,&H0000EAFF,&H00FFFFFF,&H00000000,&HB0000000,-1,0,0,0,100,100,2,0,3,3,0,8,90,90,260,1
+Style: MainSub,DejaVu Sans,56,&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,5,2,2,95,95,380,1
+Style: TopBadge,DejaVu Sans,44,&H0000EAFF,&H00FFFFFF,&H00000000,&HB0000000,-1,0,0,0,100,100,2,0,3,3,0,8,95,95,260,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -186,7 +186,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     out_ass.parent.mkdir(parents=True, exist_ok=True)
     out_ass.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    log("SUBS", f"Generated 1080x1920 ASS subtitles ({len(events)} events, MarginL/R=90, MarginV=380) -> {out_ass}")
+    log("SUBS", f"Generated 1080x1920 ASS subtitles ({len(events)} events, MarginL/R=95, MarginV=380) -> {out_ass}")
     return out_ass
 
 
@@ -346,17 +346,21 @@ def mix_audio_and_compose(
             max_play = max(0.15, total_dur - (abs_ms / 1000.0))
             if sfx_id == "record_scratch":
                 max_play = min(max_play, 0.25)
+            elif sfx_id == "human_scream_cut":
+                max_play = min(max_play, 0.35)
 
-            # Controlled per-SFX levels relative to -10 dB SFX bus
+            # Controlled per-SFX levels & EQ relative to -10 dB SFX bus
             extra_gain = ""
             if sfx_id == "record_scratch":
-                extra_gain = ",volume=-4dB"  # -10dB bus -4dB = -14 dB
+                extra_gain = ",afade=t=out:st=0.20:d=0.05,volume=-4dB"  # -10dB bus -4dB = -14 dB
             elif sfx_id == "wings_buzz_loud":
                 extra_gain = ",lowpass=f=1800,volume=-6dB"  # -10dB bus -6dB = -16 dB smooth
+            elif sfx_id == "human_scream_cut":
+                extra_gain = ",afade=t=out:st=0.33:d=0.02"  # Hard cut right as screen goes black!
 
             filter_parts.append(
                 f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
-                f"{extra_gain},atrim=0:{max_play:.4f},adelay={abs_ms}|{abs_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
+                f",atrim=0:{max_play:.4f}{extra_gain},adelay={abs_ms}|{abs_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
             )
             sfx_labels.append(f"[{lbl}]")
             sfx_counter += 1

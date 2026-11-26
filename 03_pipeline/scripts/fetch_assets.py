@@ -27,17 +27,25 @@ from pipeline_utils import (
     load_and_validate_spec,
     log,
     resolve_assets_dir,
+    resolve_family_ready_blend,
     upsert_catalog_entry,
 )
 
 POLYHAVEN_FILES_API = "https://api.polyhaven.com/files/{asset_id}"
 
-# Curated 100% CC0 Poly Haven assets tailored for Indonesian kosan kitchen Micro-POV
+# Curated 100% CC0 Poly Haven PBR textures for dense Indonesian kosan kitchen
 POLYHAVEN_TEXTURES: List[Dict[str, Any]] = [
     {
         "id": "interior_tiles",
         "alias": "kitchen_tile_pbr",
         "desc": "Keramik lantai dapur PBR (CC0 Poly Haven)",
+        "resolution": "1k",
+        "maps": ["Diffuse", "Rough", "nor_gl"],
+    },
+    {
+        "id": "painted_plaster_wall",
+        "alias": "kosan_wall_pbr",
+        "desc": "Tekstur tembok plester kosan PBR (CC0 Poly Haven)",
         "resolution": "1k",
         "maps": ["Diffuse", "Rough", "nor_gl"],
     },
@@ -57,27 +65,15 @@ POLYHAVEN_HDRIS: List[Dict[str, Any]] = [
         "desc": "HDRI pencahayaan ruangan dalam kosan (CC0 Poly Haven)",
         "resolution": "1k",
     },
-    {
-        "id": "abandoned_tiled_room",
-        "alias": "tiled_room_hdri",
-        "desc": "HDRI ruangan keramik alternatif (CC0 Poly Haven)",
-        "resolution": "1k",
-    },
 ]
 
+# 15 Real CC0 Poly Haven kitchen props (adopted from Zack-Blender-Pack polyhaven_assets.txt)
 POLYHAVEN_MODELS: List[Dict[str, Any]] = [
     {
         "id": "modern_wooden_cabinet",
         "catalog_id": "kitchen_cabinet_gap",
         "category": "environment",
         "desc": "Lemari dapur kayu CC0 (Poly Haven GLTF)",
-        "resolution": "1k",
-    },
-    {
-        "id": "cardboard_box_01",
-        "catalog_id": "cardboard_box_01",
-        "category": "prop",
-        "desc": "Kardus buntu sudut dapur CC0 (Poly Haven GLTF)",
         "resolution": "1k",
     },
     {
@@ -88,13 +84,98 @@ POLYHAVEN_MODELS: List[Dict[str, Any]] = [
         "resolution": "1k",
     },
     {
+        "id": "cardboard_box_01",
+        "catalog_id": "cardboard_box_01",
+        "category": "prop",
+        "desc": "Kardus buntu sudut dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
         "id": "wooden_bowl_01",
         "catalog_id": "kitchen_bowl_01",
         "category": "prop",
         "desc": "Mangkuk dapur CC0 (Poly Haven GLTF)",
         "resolution": "1k",
     },
+    {
+        "id": "wooden_bowl_02",
+        "catalog_id": "kitchen_bowl_02",
+        "category": "prop",
+        "desc": "Mangkuk kayu dapur kedua CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "pot_enamel_01",
+        "catalog_id": "kitchen_pot_enamel",
+        "category": "prop",
+        "desc": "Panci enamel dapur kosan CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "brass_pan_01",
+        "catalog_id": "kitchen_pan_01",
+        "category": "prop",
+        "desc": "Wajan penggorengan dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "metal_jug",
+        "catalog_id": "kitchen_metal_jug",
+        "category": "prop",
+        "desc": "Ceret/teko logam dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "jug_01",
+        "catalog_id": "kitchen_jug_01",
+        "category": "prop",
+        "desc": "Botol/kendi dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "tea_set_01",
+        "catalog_id": "kitchen_tea_set",
+        "category": "prop",
+        "desc": "Teko & gelas teh dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "electric_stove",
+        "catalog_id": "kitchen_stove",
+        "category": "environment",
+        "desc": "Kompor dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "wooden_cutting_board",
+        "catalog_id": "kitchen_cutting_board",
+        "category": "prop",
+        "desc": "Talenan kayu dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "WoodenChair_01",
+        "catalog_id": "kitchen_chair_01",
+        "category": "environment",
+        "desc": "Kursi kayu dapur kosan CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "wicker_basket_02",
+        "catalog_id": "kitchen_basket_02",
+        "category": "prop",
+        "desc": "Keranjang dapur anyaman CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "wall_clock",
+        "catalog_id": "kitchen_wall_clock",
+        "category": "prop",
+        "desc": "Jam dinding dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
 ]
+
 
 
 def _pick_resolution(res_dict: Dict[str, Any], preferred: str) -> str:
@@ -289,13 +370,14 @@ def ensure_procedural_catalog_entries(assets_dir: Path) -> None:
         },
         {
             "id": "human_silhouette_giant",
-            "category": "character_prop",
-            "source": "procedural_blender",
+            "category": "character_rig",
+            "source": "mpfb2_zack_blender_pack",
             "license": "CC0",
-            "module": "03_pipeline/scripts/procedural_props.py:build_human_silhouette_giant",
-            "file": "02_assets/models_3d/human_silhouette_giant.glb",
-            "scale_hint": "tinggi 1.72m",
-            "procedural_ready": True,
+            "module": "03_pipeline/scripts/mpfb_human.py:prepare_mpfb2_human",
+            "file": "02_assets/models_3d/family_ready.blend",
+            "scale_hint": "MPFB2 adult rig (~1.67m) with ENHANCED_SSS + 31 ARKit face keys + Displace 0.006",
+            "procedural_ready": False,
+            "cached": (assets_dir / "models_3d" / "family_ready.blend").exists(),
         },
         {
             "id": "cockroach_antennae_rig",
@@ -314,7 +396,7 @@ def ensure_procedural_catalog_entries(assets_dir: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Auto-fetch CC0 textures, HDRIs, and 3D models from Poly Haven API."
+        description="Auto-fetch CC0 textures, HDRIs, and 3D models from Poly Haven API + sync MPFB2 rig."
     )
     parser.add_argument(
         "--spec",
@@ -346,6 +428,18 @@ def main() -> int:
 
     log("FETCH", f"Episode: {spec['episode_id']} — {spec['title']}")
     log("FETCH", f"Cache directory: {assets_dir}")
+
+    # Sync MPFB2 family_ready.blend from Drive / Kaggle input into project cache
+    if not args.verify_urls:
+        fam_blend = resolve_family_ready_blend(assets_dir)
+        if fam_blend:
+            log("FETCH", f"[MPFB2] family_ready.blend ready -> {fam_blend}")
+        else:
+            log(
+                "WARN",
+                "family_ready.blend not found in Drive/cache yet. Ensure Google Drive is mounted or "
+                "set MICRO_POV_FAMILY_BLEND before running build_and_render.py.",
+            )
 
     all_urls: List[str] = []
     errors: List[str] = []
@@ -386,3 +480,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

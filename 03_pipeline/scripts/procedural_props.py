@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Stylized Low-Poly Procedural 3D Props Builder for Blender (bpy).
+"""Stylized Indonesian Procedural 3D Props & Micro-POV Rig Builder for Blender (bpy).
 
-Creates high-contrast, properly proportioned Indonesian kosan kitchen props that do not
-exist on public CC0 APIs (NO crude default cubes):
-  1. build_kitchen_tile_floor      - 30x30cm beveled ceramic floor + Poly Haven PBR + walls + TL neon fixture
+Creates properly proportioned Indonesian kosan kitchen props that do not exist on public CC0 APIs
+(real human character is handled by MPFB2 via `mpfb_human.py`, never procedural blocks):
+  1. build_kitchen_tile_floor      - 30x30cm beveled ceramic floor + Poly Haven PBR tile & plaster walls + TL neon
   2. build_indomie_bowl_spill      - Glossy oily yellow kuah puddle + curled wavy noodles + chili/scallion + tipped bowl
   3. build_sandal_jepit_swallow    - Ergonomic green-white Swallow flip-flop sole + curved V-strap & toe-post
-  4. build_cockroach_antennae_rig  - Camera-parented segmented antennae + foldable translucent wings
-  5. build_human_silhouette_giant  - 1.72m proportional low-poly human in t-shirt & shorts with rigged arm/foot/eyes
-  6. build_fridge_under_gap        - Kosan 2-door fridge on 4 rubber feet with crisp 5.5cm dark under-gap
-  7. build_wind_lines              - Glowing cyan bullet-time airflow ribbons (Scene 3)
-  8. build_dust_puff               - Stylized low-poly impact dust clouds (Scene 4)
-  9. build_speed_lines_rig         - Camera-parented action sprint speed streaks (Scene 4)
+  4. build_cockroach_antennae_rig  - Camera-parented segmented antennae + translucent amber-brown veined wings
+  5. build_fridge_under_gap        - Kosan 2-door fridge on 4 rubber feet with crisp 5.5cm dark under-gap
+  6. build_wind_lines              - Subtle translucent cyan bullet-time airflow ribbons (Scene 3)
+  7. build_dust_puff               - Stylized impact dust cloud burst (Scene 4)
+  8. build_speed_lines_rig         - Subtle thin semi-transparent edge speed streaks (Scene 4 & 8)
 
 Can also be invoked directly via Blender CLI to export cached `.glb` files:
   blender --background --python 03_pipeline/scripts/procedural_props.py -- --export-glb 02_assets
@@ -307,6 +306,81 @@ def _build_tile_pbr_material(assets_dir: Optional[Path]) -> bpy.types.Material:
     return mat
 
 
+def _build_wall_pbr_material(assets_dir: Optional[Path]) -> bpy.types.Material:
+    """Build muted warm Indonesian kosan plaster wall shader (albedo <= 0.56, no white blowout)."""
+    mat = bpy.data.materials.new("Mat_Kosan_Wall")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+
+    diff_path = None
+    rough_path = None
+    nor_path = None
+    if assets_dir is not None:
+        wall_dir = assets_dir / "textures" / "painted_plaster_wall"
+        if wall_dir.exists():
+            for p in wall_dir.iterdir():
+                low = p.name.lower()
+                if "diff" in low:
+                    diff_path = p
+                elif "rough" in low:
+                    rough_path = p
+                elif "nor_gl" in low:
+                    nor_path = p
+
+    if diff_path and diff_path.exists():
+        tc = nt.nodes.new("ShaderNodeTexCoord")
+        mp = nt.nodes.new("ShaderNodeMapping")
+        mp.inputs["Scale"].default_value = (1.6, 1.6, 1.6)
+        nt.links.new(tc.outputs["Object"], mp.inputs["Vector"])
+
+        img_d = nt.nodes.new("ShaderNodeTexImage")
+        img_d.image = bpy.data.images.load(str(diff_path), check_existing=True)
+        img_d.projection = "BOX"
+        img_d.projection_blend = 0.2
+        nt.links.new(mp.outputs["Vector"], img_d.inputs["Vector"])
+
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MULTIPLY"
+        mix.inputs[0].default_value = 1.0
+        sock_a = next(i for i in mix.inputs if i.name == "A" and i.type == "RGBA")
+        sock_b = next(i for i in mix.inputs if i.name == "B" and i.type == "RGBA")
+        sock_out = next(o for o in mix.outputs if o.name == "Result" and o.type == "RGBA")
+        sock_b.default_value = (0.56, 0.53, 0.47, 1.0)
+        nt.links.new(img_d.outputs["Color"], sock_a)
+        nt.links.new(sock_out, bsdf.inputs["Base Color"])
+
+        if rough_path and rough_path.exists():
+            img_r = nt.nodes.new("ShaderNodeTexImage")
+            img_r.image = bpy.data.images.load(str(rough_path), check_existing=True)
+            img_r.image.colorspace_settings.name = "Non-Color"
+            img_r.projection = "BOX"
+            nt.links.new(mp.outputs["Vector"], img_r.inputs["Vector"])
+            nt.links.new(img_r.outputs["Color"], bsdf.inputs["Roughness"])
+        else:
+            _set_bsdf(bsdf, "Roughness", 0.85)
+
+        if nor_path and nor_path.exists():
+            img_n = nt.nodes.new("ShaderNodeTexImage")
+            img_n.image = bpy.data.images.load(str(nor_path), check_existing=True)
+            img_n.image.colorspace_settings.name = "Non-Color"
+            img_n.projection = "BOX"
+            nt.links.new(mp.outputs["Vector"], img_n.inputs["Vector"])
+            nmap = nt.nodes.new("ShaderNodeNormalMap")
+            nmap.inputs["Strength"].default_value = 0.35
+            nt.links.new(img_n.outputs["Color"], nmap.inputs["Color"])
+            nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    else:
+        _set_bsdf(bsdf, "Base Color", (0.54, 0.52, 0.47, 1.0))
+        _set_bsdf(bsdf, "Roughness", 0.85)
+    return mat
+
+
 def build_kitchen_tile_floor(
     assets_dir: Optional[Path] = None,
     collection: Optional[bpy.types.Collection] = None,
@@ -348,34 +422,46 @@ def build_kitchen_tile_floor(
             collection=collection,
         )
 
-    # Kosan kitchen walls: warm muted cream/gray (albedo ~0.55)
-    wall_mat = make_material("Mat_Kosan_Wall", (0.54, 0.52, 0.47, 1.0), roughness=0.84)
-    baseboard_mat = make_material("Mat_Wall_Baseboard", (0.24, 0.25, 0.27, 1.0), roughness=0.52)
+    # Kosan kitchen walls: Poly Haven painted_plaster_wall PBR tinted warm muted cream (albedo <= 0.56)
+    wall_mat = _build_wall_pbr_material(assets_dir)
+    baseboard_mat = make_material("Mat_Wall_Baseboard", (0.20, 0.21, 0.23, 1.0), roughness=0.52)
+    counter_wood_mat = make_material("Mat_Kosan_CounterBody", (0.22, 0.16, 0.12, 1.0), roughness=0.58)
+    counter_top_mat = make_material("Mat_Kosan_CounterTop", (0.34, 0.33, 0.31, 1.0), roughness=0.28, coat=0.25)
 
-    # Left wall at x = -0.85m (tight kosan kitchen corridor!)
-    _make_beveled_box("Wall_Left", (0.12, 7.0, 2.8), 0.005, wall_mat, root, (-0.91, 1.8, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Left", (0.02, 7.0, 0.10), 0.004, baseboard_mat, root, (-0.84, 1.8, 0.05), collection=collection)
+    # Left wall at x = -0.92m (tight kosan kitchen corridor, clear of camera!)
+    _make_beveled_box("Wall_Left", (0.12, 7.2, 2.8), 0.005, wall_mat, root, (-0.98, 1.8, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Left", (0.02, 7.2, 0.10), 0.004, baseboard_mat, root, (-0.91, 1.8, 0.05), collection=collection)
 
     # Back wall behind fridge at y = 3.55m
-    _make_beveled_box("Wall_Back", (4.0, 0.12, 2.8), 0.005, wall_mat, root, (0.6, 3.61, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Back", (4.0, 0.02, 0.10), 0.004, baseboard_mat, root, (0.6, 3.54, 0.05), collection=collection)
+    _make_beveled_box("Wall_Back", (4.0, 0.12, 2.8), 0.005, wall_mat, root, (0.5, 3.61, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Back", (4.0, 0.02, 0.10), 0.004, baseboard_mat, root, (0.5, 3.54, 0.05), collection=collection)
 
-    # Right wall at x = 1.65m
-    _make_beveled_box("Wall_Right", (0.12, 7.0, 2.8), 0.005, wall_mat, root, (1.71, 1.8, 1.4), collection=collection)
+    # Right wall at x = 1.68m
+    _make_beveled_box("Wall_Right", (0.12, 7.2, 2.8), 0.005, wall_mat, root, (1.74, 1.8, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Right", (0.02, 7.2, 0.10), 0.004, baseboard_mat, root, (1.67, 1.8, 0.05), collection=collection)
+
+    # Front wall behind camera start at y = -1.6m (prevents empty void reflections!)
+    _make_beveled_box("Wall_Front", (4.0, 0.12, 2.8), 0.005, wall_mat, root, (0.5, -1.65, 1.4), collection=collection)
+
+    # Compact Indonesian kosan concrete/wood kitchen counter along right wall (x=1.08..1.66, y=-0.3..1.45, z=0..0.82)
+    _make_beveled_box("Kosan_Counter_Base", (0.56, 1.75, 0.78), 0.006, counter_wood_mat, root, (1.38, 0.58, 0.39), collection=collection)
+    _make_beveled_box("Kosan_Counter_Top", (0.60, 1.80, 0.045), 0.006, counter_top_mat, root, (1.36, 0.58, 0.805), collection=collection)
+    # Floating wall shelf above counter (holds bowls, jug, tea set)
+    _make_beveled_box("Kosan_Wall_Shelf", (0.24, 1.40, 0.03), 0.004, counter_wood_mat, root, (1.54, 0.60, 1.48), collection=collection)
 
     # Ceiling + Classic Indonesian TL Fluorescent Tube Fixture directly overhead
-    ceil_mat = make_material("Mat_Ceiling", (0.84, 0.85, 0.86, 1.0), roughness=0.85)
-    _make_beveled_box("Ceiling", (4.0, 7.0, 0.10), 0.0, ceil_mat, root, (0.4, 1.8, 2.75), collection=collection)
+    ceil_mat = make_material("Mat_Ceiling", (0.54, 0.55, 0.56, 1.0), roughness=0.88)
+    _make_beveled_box("Ceiling", (4.2, 7.2, 0.10), 0.0, ceil_mat, root, (0.4, 1.8, 2.75), collection=collection)
 
-    fixture_mat = make_material("Mat_Neon_Fixture", (0.72, 0.74, 0.76, 1.0), roughness=0.35, metallic=0.6)
-    _make_beveled_box("Neon_Housing", (0.09, 1.25, 0.045), 0.006, fixture_mat, root, (0.0, 1.55, 2.67), collection=collection)
+    fixture_mat = make_material("Mat_Neon_Fixture", (0.62, 0.64, 0.66, 1.0), roughness=0.35, metallic=0.6)
+    _make_beveled_box("Neon_Housing", (0.09, 1.25, 0.045), 0.006, fixture_mat, root, (0.0, 2.05, 2.67), collection=collection)
 
     neon_tube_mat = make_material(
         "Mat_Neon_Tube_Glow",
         (0.95, 0.98, 1.0, 1.0),
         roughness=0.1,
         emission_color=(0.90, 0.96, 1.0, 1.0),
-        emission_strength=0.1,  # Animated to 28.0 when switch clicks on!
+        emission_strength=0.1,  # Animated to 18.0 when switch clicks on!
     )
     bm_tube = bmesh.new()
     bmesh.ops.create_cone(bm_tube, cap_ends=True, cap_tris=False, segments=16, radius1=0.018, radius2=0.018, depth=1.18)
@@ -385,7 +471,7 @@ def build_kitchen_tile_floor(
         neon_tube_mat,
         True,
         root,
-        (0.0, 1.55, 2.62),
+        (0.0, 2.05, 2.62),
         (math.radians(90.0), 0.0, 0.0),
         collection=collection,
     )
@@ -639,33 +725,33 @@ def build_cockroach_antennae_rig(
     _make_tube_curve("Cockroach_Antenna_R", right_pts, 0.0014, chitin_mat, resolution=12, bevel_res=4, parent=ant_r_pivot, collection=collection)
 
     # Translucent amber-brown insect wings anchored at bottom-left/bottom-right camera edges
-    # (blurred gently by macro DOF so they read as OUR wings, never angel wings behind the human)
-    wing_l_pivot = _make_empty("Wing_Left_Pivot", (-0.040, -0.028, -0.046), parent=rig_root, collection=collection)
-    wing_r_pivot = _make_empty("Wing_Right_Pivot", (0.040, -0.028, -0.046), parent=rig_root, collection=collection)
+    # (blurred gently by macro DOF so they read as OUR wings, never white wings behind the human)
+    wing_l_pivot = _make_empty("Wing_Left_Pivot", (-0.028, -0.034, -0.048), parent=rig_root, collection=collection)
+    wing_r_pivot = _make_empty("Wing_Right_Pivot", (0.028, -0.034, -0.048), parent=rig_root, collection=collection)
 
     def _build_wing_mesh(name: str, side: float, parent: bpy.types.Object) -> bpy.types.Object:
         bm = bmesh.new()
         pts = [
             (0.0, 0.0, 0.0),
-            (side * 0.010, -0.006, -0.014),
-            (side * 0.024, -0.010, -0.036),
-            (side * 0.030, -0.024, -0.056),
-            (side * 0.014, -0.032, -0.042),
-            (side * 0.004, -0.020, -0.016),
+            (side * 0.008, 0.006, -0.016),
+            (side * 0.020, 0.008, -0.042),
+            (side * 0.026, -0.010, -0.062),
+            (side * 0.010, -0.020, -0.046),
+            (side * 0.002, -0.012, -0.018),
         ]
         verts = [bm.verts.new(p) for p in pts]
         bm.faces.new(verts if side > 0 else list(reversed(verts)))
         res = bmesh.ops.extrude_face_region(bm, geom=list(bm.faces))
         ext_verts = [e for e in res["geom"] if isinstance(e, bmesh.types.BMVert)]
-        bmesh.ops.translate(bm, verts=ext_verts, vec=Vector((0.0, 0.0004, 0.0)))
+        bmesh.ops.translate(bm, verts=ext_verts, vec=Vector((0.0, 0.0005, 0.0)))
         w_obj = _new_mesh_obj(name, bm, wing_mat, True, parent, collection=collection)
 
         # Subtle chitin vein ribs along the wing membrane
-        for v_idx, tip in enumerate([(side * 0.026, -0.016, -0.048), (side * 0.018, -0.026, -0.038)]):
+        for v_idx, tip in enumerate([(side * 0.022, -0.004, -0.054), (side * 0.014, -0.014, -0.042)]):
             _make_tube_curve(
                 f"{name}_Vein_{v_idx}",
                 [(0.0, 0.0, 0.0, 1.0), (tip[0] * 0.5, tip[1] * 0.5, tip[2] * 0.5, 0.7), (tip[0], tip[1], tip[2], 0.3)],
-                0.00045,
+                0.00055,
                 vein_mat,
                 resolution=6,
                 bevel_res=2,
@@ -689,157 +775,7 @@ def build_cockroach_antennae_rig(
 
 
 # =============================================================================
-# 5. HUMAN SILHOUETTE GIANT (1.72m STYLIZED LOW-POLY ODD-TILT STYLE — RIGGED)
-# =============================================================================
-
-def build_human_silhouette_giant(
-    location: Tuple[float, float, float] = (0.0, 1.35, 0.0),
-    collection: Optional[bpy.types.Collection] = None,
-) -> Dict[str, bpy.types.Object]:
-    """Build smooth stylized low-poly human (Odd Tilt style) with long t-shirt covering hips."""
-    root = _make_empty("Human_Giant_Root", location, collection=collection)
-
-    skin_mat = make_material("Mat_Human_Skin", (0.50, 0.31, 0.19, 1.0), roughness=0.56)
-    shirt_mat = make_material("Mat_Human_KausOblong", (0.08, 0.11, 0.16, 1.0), roughness=0.84)
-    shorts_mat = make_material("Mat_Human_Shorts", (0.14, 0.15, 0.18, 1.0), roughness=0.86)
-    hair_mat = make_material("Mat_Human_Hair", (0.03, 0.03, 0.04, 1.0), roughness=0.72)
-    eye_white = make_material("Mat_Eye_White", (0.92, 0.92, 0.92, 1.0), roughness=0.18)
-    eye_pupil = make_material("Mat_Eye_Pupil", (0.015, 0.015, 0.02, 1.0), roughness=0.10)
-
-    def _capsule(
-        name: str,
-        r_bot: float,
-        r_top: float,
-        length: float,
-        mat: bpy.types.Material,
-        parent: bpy.types.Object,
-        loc: Tuple[float, float, float],
-        rot=(0.0, 0.0, 0.0),
-    ):
-        bm = bmesh.new()
-        bmesh.ops.create_cone(bm, cap_ends=True, segments=16, radius1=r_bot, radius2=r_top, depth=length)
-        # Round top & bottom caps smoothly like a capsule
-        bmesh.ops.bevel(bm, geom=list(bm.edges), offset=min(r_bot, r_top) * 0.28, segments=2, affect="EDGES", clamp_overlap=True)
-        return _new_mesh_obj(name, bm, mat, True, parent, loc, rot, collection=collection)
-
-    def _foot(name: str, parent: bpy.types.Object, loc: Tuple[float, float, float]):
-        bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
-        bmesh.ops.scale(bm, vec=Vector((0.048, 0.125, 0.034)), verts=bm.verts)
-        return _new_mesh_obj(name, bm, skin_mat, True, parent, loc, collection=collection)
-
-    # --- RIGHT LEG (fixed stance, facing -Y so character's right is -X) ---
-    r_leg_root = _make_empty("Human_RightLeg_Pivot", (-0.11, 0.0, 0.0), parent=root, collection=collection)
-    _foot("Human_Right_Foot", r_leg_root, (0.0, -0.045, 0.030))
-    _capsule("Human_Right_Calf", 0.042, 0.058, 0.44, skin_mat, r_leg_root, (0.0, 0.0, 0.25))
-    _capsule("Human_Right_ShortLeg", 0.078, 0.094, 0.34, shorts_mat, r_leg_root, (0.0, 0.0, 0.62))
-
-    # --- LEFT LEG (independently movable to stomp in front of fridge gap in Scene 5-6!) ---
-    l_leg_root = _make_empty("Human_LeftLeg_Pivot", (0.11, 0.0, 0.0), parent=root, collection=collection)
-    _foot("Human_Left_Foot", l_leg_root, (0.0, -0.045, 0.030))
-    _capsule("Human_Left_Calf", 0.042, 0.058, 0.44, skin_mat, l_leg_root, (0.0, 0.0, 0.25))
-    _capsule("Human_Left_ShortLeg", 0.078, 0.094, 0.34, shorts_mat, l_leg_root, (0.0, 0.0, 0.62))
-
-    # --- LONG KAUS OBLONG TORSO (smooth tapered cylinder-ellipse covering hip/pelvis cleanly, NO boxy crotch!) ---
-    bm_torso = bmesh.new()
-    bmesh.ops.create_cone(bm_torso, cap_ends=True, segments=20, radius1=0.205, radius2=0.185, depth=0.68)
-    bmesh.ops.scale(bm_torso, vec=Vector((1.05, 0.62, 1.0)), verts=bm_torso.verts)
-    bmesh.ops.bevel(bm_torso, geom=list(bm_torso.edges), offset=0.025, segments=2, affect="EDGES", clamp_overlap=True)
-    torso_obj = _new_mesh_obj("Human_Torso_Kaus", bm_torso, shirt_mat, True, root, (0.0, 0.0, 1.09), collection=collection)
-    subsurf = torso_obj.modifiers.new("SmoothTorso", "SUBSURF")
-    subsurf.levels = 1
-    subsurf.render_levels = 1
-
-    # Smooth rounded shoulders cap
-    bm_sh = bmesh.new()
-    bmesh.ops.create_icosphere(bm_sh, subdivisions=2, radius=1.0)
-    bmesh.ops.scale(bm_sh, vec=Vector((0.23, 0.125, 0.075)), verts=bm_sh.verts)
-    _new_mesh_obj("Human_Shoulders", bm_sh, shirt_mat, True, root, (0.0, 0.0, 1.40), collection=collection)
-
-    # Left arm (relaxed at side, +X)
-    l_arm_pivot = _make_empty("Human_LeftArm_Pivot", (0.23, 0.0, 1.39), parent=root, collection=collection)
-    _capsule("Human_Left_Sleeve", 0.068, 0.074, 0.20, shirt_mat, l_arm_pivot, (0.03, 0.0, -0.09), (0.0, math.radians(-12.0), 0.0))
-    _capsule("Human_Left_Forearm", 0.038, 0.050, 0.44, skin_mat, l_arm_pivot, (0.07, -0.04, -0.36), (math.radians(-12.0), math.radians(-8.0), 0.0))
-    bm_lh = bmesh.new()
-    bmesh.ops.create_icosphere(bm_lh, subdivisions=2, radius=0.040)
-    _new_mesh_obj("Human_Left_Hand", bm_lh, skin_mat, True, l_arm_pivot, (0.10, -0.08, -0.58), collection=collection)
-
-    # Right arm (SANDAL-WIELDING ARM at -X, fully keyframeable shoulder pivot!)
-    r_arm_pivot = _make_empty("Human_RightArm_Pivot", (-0.23, 0.0, 1.39), parent=root, collection=collection)
-    _capsule("Human_Right_Sleeve", 0.068, 0.074, 0.20, shirt_mat, r_arm_pivot, (-0.02, -0.02, -0.08), (0.0, math.radians(14.0), 0.0))
-    _capsule("Human_Right_UpperArm", 0.044, 0.054, 0.29, skin_mat, r_arm_pivot, (-0.04, -0.04, -0.23), (math.radians(-18.0), 0.0, 0.0))
-    _capsule("Human_Right_Forearm", 0.036, 0.044, 0.29, skin_mat, r_arm_pivot, (-0.04, -0.14, -0.43), (math.radians(-40.0), 0.0, 0.0))
-    bm_hand = bmesh.new()
-    bmesh.ops.create_icosphere(bm_hand, subdivisions=2, radius=0.044)
-    _new_mesh_obj("Human_Right_Hand", bm_hand, skin_mat, True, r_arm_pivot, (-0.04, -0.25, -0.56), collection=collection)
-
-    # Attachment empty right inside the gripping right hand for Sandal Jepit!
-    sandal_hand_socket = _make_empty("Human_Sandal_Socket", (-0.04, -0.26, -0.57), parent=r_arm_pivot, collection=collection)
-
-    # --- NECK, HEAD & EXPRESSIVE SURPRISED FACE (FACING -Y) ---
-    head_pivot = _make_empty("Human_Head_Pivot", (0.0, 0.0, 1.46), parent=root, collection=collection)
-    _capsule("Human_Neck", 0.054, 0.050, 0.11, skin_mat, head_pivot, (0.0, 0.0, 0.04))
-
-    bm_head = bmesh.new()
-    bmesh.ops.create_icosphere(bm_head, subdivisions=3, radius=0.116)
-    bmesh.ops.scale(bm_head, vec=Vector((0.88, 0.96, 1.10)), verts=bm_head.verts)
-    _new_mesh_obj("Human_Head", bm_head, skin_mat, True, head_pivot, (0.0, -0.01, 0.18), collection=collection)
-
-    # Messy dark Indonesian kosan hair cap
-    bm_hair = bmesh.new()
-    bmesh.ops.create_icosphere(bm_hair, subdivisions=2, radius=0.123)
-    bmesh.ops.scale(bm_hair, vec=Vector((0.92, 1.00, 0.86)), verts=bm_hair.verts)
-    _new_mesh_obj("Human_Hair", bm_hair, hair_mat, True, head_pivot, (0.0, 0.012, 0.23), collection=collection)
-
-    # Expressive wide eyes + raised eyebrows (keyframe scale in Scene 8 for shocked reaction!)
-    eyes = {}
-    for side_name, sx in (("L", 0.038), ("R", -0.038)):
-        eye_p = _make_empty(f"Human_Eye_{side_name}_Pivot", (sx, -0.104, 0.195), parent=head_pivot, collection=collection)
-        bm_ew = bmesh.new()
-        bmesh.ops.create_icosphere(bm_ew, subdivisions=2, radius=0.021)
-        bmesh.ops.scale(bm_ew, vec=Vector((1.0, 0.50, 1.05)), verts=bm_ew.verts)
-        _new_mesh_obj(f"Human_EyeWhite_{side_name}", bm_ew, eye_white, True, eye_p, collection=collection)
-
-        bm_ep = bmesh.new()
-        bmesh.ops.create_icosphere(bm_ep, subdivisions=2, radius=0.0095)
-        _new_mesh_obj(f"Human_EyePupil_{side_name}", bm_ep, eye_pupil, True, eye_p, (0.0, -0.010, 0.0), collection=collection)
-
-        # Surprised eyebrow arc
-        _capsule(
-            f"Human_Brow_{side_name}",
-            0.0045,
-            0.0045,
-            0.034,
-            hair_mat,
-            head_pivot,
-            (sx, -0.106, 0.228),
-            (0.0, math.radians(90.0), math.radians(12.0 if sx > 0 else -12.0)),
-        )
-        eyes[side_name] = eye_p
-
-    # Clean rounded-oval shocked mouth (starts slightly open, gapes wide in Scene 8!)
-    mouth_mat = make_material("Mat_Human_Mouth", (0.10, 0.02, 0.02, 1.0), roughness=0.75)
-    bm_m = bmesh.new()
-    bmesh.ops.create_icosphere(bm_m, subdivisions=2, radius=0.020)
-    bmesh.ops.scale(bm_m, vec=Vector((0.95, 0.42, 0.65)), verts=bm_m.verts)
-    mouth_obj = _new_mesh_obj("Human_Mouth", bm_m, mouth_mat, True, head_pivot, (0.0, -0.105, 0.125), collection=collection)
-
-    return {
-        "root": root,
-        "left_leg": l_leg_root,
-        "right_leg": r_leg_root,
-        "right_arm": r_arm_pivot,
-        "left_arm": l_arm_pivot,
-        "sandal_socket": sandal_hand_socket,
-        "head": head_pivot,
-        "eye_l": eyes["L"],
-        "eye_r": eyes["R"],
-        "mouth": mouth_obj,
-    }
-
-
-# =============================================================================
-# 6. FRIDGE WITH CRISP 5.5cm DARK UNDER-GAP (KOLONG KULKAS)
+# 5. FRIDGE WITH CRISP 5.5cm DARK UNDER-GAP (KOLONG KULKAS)
 # =============================================================================
 
 def build_fridge_under_gap(
@@ -849,10 +785,11 @@ def build_fridge_under_gap(
     """Build stylized Indonesian kosan 2-door fridge raised 5.5cm off the floor on 4 rubber feet."""
     root = _make_empty("Fridge_UnderGap_Root", location, collection=collection)
 
-    body_mat = make_material("Mat_Fridge_Body", (0.82, 0.86, 0.90, 1.0), roughness=0.26, metallic=0.18, coat=0.5)
-    chrome_mat = make_material("Mat_Fridge_Chrome", (0.85, 0.87, 0.90, 1.0), roughness=0.15, metallic=0.92)
-    rubber_mat = make_material("Mat_Fridge_RubberFoot", (0.05, 0.05, 0.06, 1.0), roughness=0.78)
-    void_mat = make_material("Mat_UnderGap_ShadowVoid", (0.008, 0.009, 0.012, 1.0), roughness=0.98)
+    # Capped albedo <= 0.62 so overhead neon highlights stay controlled under AgX
+    body_mat = make_material("Mat_Fridge_Body", (0.56, 0.60, 0.64, 1.0), roughness=0.28, metallic=0.22, coat=0.45)
+    chrome_mat = make_material("Mat_Fridge_Chrome", (0.76, 0.78, 0.82, 1.0), roughness=0.16, metallic=0.92)
+    rubber_mat = make_material("Mat_Fridge_RubberFoot", (0.04, 0.04, 0.05, 1.0), roughness=0.78)
+    void_mat = make_material("Mat_UnderGap_ShadowVoid", (0.006, 0.007, 0.010, 1.0), roughness=0.98)
 
     gap_h = 0.055  # 5.5 cm dark refuge gap for 1.5cm cockroach!
     # 4 rubber leveling feet
@@ -880,40 +817,40 @@ def build_fridge_under_gap(
 
 
 # =============================================================================
-# 7, 8, 9. VFX PROPS: CYAN WIND WAVES (SC3), DUST PUFF (SC4), SPEED LINES (SC4)
+# 6, 7, 8. VFX PROPS: CYAN WIND WAVES (SC3), DUST PUFF (SC4), SPEED LINES (SC4)
 # =============================================================================
 
 def build_wind_lines(
     location: Tuple[float, float, float] = (0.0, 0.55, 0.12),
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Subtle translucent cyan airflow ribbons at frame edges (Scene 3 bullet-time)."""
+    """Subtle, thin semi-transparent cyan airflow ribbons strictly at frame perimeter (Scene 3)."""
     root = _make_empty("Wind_Lines_Root", location, collection=collection)
     cyan_mat = make_material(
         "Mat_Cyan_WindGlow",
-        (0.05, 0.90, 1.0, 1.0),
+        (0.05, 0.88, 1.0, 1.0),
         roughness=0.15,
-        emission_color=(0.05, 0.90, 1.0, 1.0),
-        emission_strength=5.5,
-        alpha=0.38,
+        emission_color=(0.05, 0.88, 1.0, 1.0),
+        emission_strength=3.6,
+        alpha=0.28,
     )
     ribbons = []
     offsets = [
-        (-0.24, 0.14),
-        (-0.18, 0.24),
-        (0.18, 0.24),
-        (0.24, 0.13),
-        (-0.20, 0.05),
-        (0.20, 0.06),
+        (-0.28, 0.16),
+        (-0.22, 0.28),
+        (0.22, 0.28),
+        (0.28, 0.15),
+        (-0.24, 0.06),
+        (0.24, 0.06),
     ]
     for idx, (ox, oz) in enumerate(offsets):
         pts = [
-            (ox * 1.4, 0.42, oz + 0.18, 0.30),
-            (ox * 1.1, 0.18, oz + 0.07, 0.85),
-            (ox * 0.85, -0.08, oz - 0.02, 0.95),
-            (ox * 0.65, -0.32, oz - 0.08, 0.20),
+            (ox * 1.35, 0.42, oz + 0.18, 0.25),
+            (ox * 1.10, 0.18, oz + 0.07, 0.80),
+            (ox * 0.88, -0.08, oz - 0.02, 0.90),
+            (ox * 0.68, -0.32, oz - 0.08, 0.18),
         ]
-        r_obj = _make_tube_curve(f"Wind_Ribbon_{idx:02d}", pts, 0.0020, cyan_mat, resolution=10, bevel_res=3, parent=root, collection=collection)
+        r_obj = _make_tube_curve(f"Wind_Ribbon_{idx:02d}", pts, 0.0014, cyan_mat, resolution=10, bevel_res=3, parent=root, collection=collection)
         ribbons.append(r_obj)
     return {"root": root, "ribbons": ribbons}
 
@@ -922,15 +859,15 @@ def build_dust_puff(
     location: Tuple[float, float, float] = (0.0, 0.35, 0.02),
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Stylized low-poly dust cloud ring that bursts outward when sandal slams floor (Scene 4)."""
+    """Impact dust cloud ring that bursts outward when sandal slams floor (Scene 4)."""
     root = _make_empty("Dust_Puff_Root", location, collection=collection)
-    dust_mat = make_material("Mat_Dust_Puff", (0.72, 0.69, 0.63, 1.0), roughness=0.92, alpha=0.80)
+    dust_mat = make_material("Mat_Dust_Puff", (0.62, 0.59, 0.54, 1.0), roughness=0.92, alpha=0.68)
     puffs = []
     for i in range(10):
         ang = (2.0 * math.pi * i) / 10.0
         r = 0.09 + 0.03 * (i % 2)
         bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.036 + 0.010 * (i % 3))
+        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.032 + 0.008 * (i % 3))
         p_obj = _new_mesh_obj(
             f"Dust_Cloud_{i:02d}",
             bm,
@@ -948,26 +885,26 @@ def build_speed_lines_rig(
     camera_obj: Optional[bpy.types.Object] = None,
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Subtle, thin translucent radial speed-lines strictly around outer screen edges."""
+    """Subtle, thin semi-transparent radial speed-lines strictly around outer screen edges."""
     root = _make_empty("Speed_Lines_Root", (0.0, 0.0, 0.0), parent=camera_obj, collection=collection)
     line_mat = make_material(
         "Mat_Speed_Lines",
-        (0.90, 0.95, 1.0, 1.0),
+        (0.88, 0.94, 1.0, 1.0),
         roughness=0.15,
-        emission_color=(0.82, 0.92, 1.0, 1.0),
-        emission_strength=2.2,
-        alpha=0.28,
+        emission_color=(0.78, 0.90, 1.0, 1.0),
+        emission_strength=1.8,
+        alpha=0.22,
     )
     for i in range(12):
         ang = (2.0 * math.pi * i) / 12.0
-        rx = 0.096 * math.cos(ang)
-        ry = 0.145 * math.sin(ang)
+        rx = 0.105 * math.cos(ang)
+        ry = 0.155 * math.sin(ang)
         pts = [
             (rx * 1.18, ry * 1.18, -0.09, 0.15),
-            (rx * 0.98, ry * 0.98, -0.18, 0.70),
+            (rx * 0.98, ry * 0.98, -0.18, 0.65),
             (rx * 0.88, ry * 0.88, -0.26, 0.10),
         ]
-        _make_tube_curve(f"Speed_Line_{i:02d}", pts, 0.00035, line_mat, resolution=4, bevel_res=2, parent=root, collection=collection)
+        _make_tube_curve(f"Speed_Line_{i:02d}", pts, 0.00028, line_mat, resolution=4, bevel_res=2, parent=root, collection=collection)
     return {"root": root}
 
 
@@ -989,7 +926,6 @@ def export_all_procedural_glbs(assets_dir: Path) -> None:
         ("indomie_bowl_spill", "prop", lambda: build_indomie_bowl_spill((0.0, 0.0, 0.0))),
         ("sandal_jepit_swallow", "prop", lambda: build_sandal_jepit_swallow((0.0, 0.0, 0.0))),
         ("fridge_under_gap", "environment", lambda: build_fridge_under_gap((0.0, 0.0, 0.0))),
-        ("human_silhouette_giant", "character_prop", lambda: build_human_silhouette_giant((0.0, 0.0, 0.0))),
         ("cockroach_antennae_rig", "pov_foreground", lambda: build_cockroach_antennae_rig(None)),
     ]
 
