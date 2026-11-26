@@ -174,6 +174,34 @@ POLYHAVEN_MODELS: List[Dict[str, Any]] = [
         "desc": "Jam dinding dapur CC0 (Poly Haven GLTF)",
         "resolution": "1k",
     },
+    {
+        "id": "ceramic_vase_01",
+        "catalog_id": "kitchen_jar_01",
+        "category": "prop",
+        "desc": "Toples/vas keramik rak dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "ceramic_vase_02",
+        "catalog_id": "kitchen_jar_02",
+        "category": "prop",
+        "desc": "Botol/vas keramik kedua rak dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "ceramic_vase_03",
+        "catalog_id": "kitchen_jar_03",
+        "category": "prop",
+        "desc": "Toples keramik ketiga rak dapur CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
+    {
+        "id": "food_apple_01",
+        "catalog_id": "kitchen_fruit_01",
+        "category": "prop",
+        "desc": "Buah dapur kosan CC0 (Poly Haven GLTF)",
+        "resolution": "1k",
+    },
 ]
 
 

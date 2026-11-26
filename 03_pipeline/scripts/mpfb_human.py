@@ -39,13 +39,13 @@ Z = Vector((0.0, 0.0, 1.0))
 
 BOOST = 1.6
 
-# Finger curls for firmly gripping the Swallow flip-flop (Scenes 1-7) vs open panic drop (Scene 8)
+# Finger curls for firmly gripping the Swallow flip-flop heel (power grip) vs open panic drop (Scene 8)
 GRIP_CURLS = {
-    "1": (24, 34, 24),
-    "2": (52, 68, 48),
-    "3": (58, 72, 52),
-    "4": (62, 74, 54),
-    "5": (64, 76, 56),
+    "1": (28, 38, 26),
+    "2": (64, 78, 56),
+    "3": (68, 80, 58),
+    "4": (70, 82, 60),
+    "5": (72, 84, 62),
 }
 OPEN_CURLS = {
     "1": (4, 6, 4),
@@ -69,40 +69,42 @@ def sym(**kw: float) -> Dict[str, float]:
 
 # Proven Zack-style ARKit expression library (multiplied by BOOST = 1.6)
 EXPR: Dict[str, Dict[str, float]] = {
-    "neutral": sym(mouthSmile_=0.08),
+    "neutral": sym(mouthSmile_=0.06),
     "glare": sym(
-        browDown_=0.78,
-        eyeWide_=0.55,
-        noseSneer_=0.55,
+        browDown_=0.95,
+        eyeWide_=0.68,
+        noseSneer_=0.78,
         mouthPress_=0.45,
-        mouthFrown_=0.45,
-        jawForward=0.15,
+        mouthFrown_=0.60,
+        jawOpen=0.16,
+        jawForward=0.22,
     ),
     "angry": sym(
-        browDown_=0.85,
-        eyeSquint_=0.35,
-        eyeWide_=0.30,
-        noseSneer_=0.75,
-        mouthPress_=0.50,
-        mouthFrown_=0.55,
-        mouthStretch_=0.35,
-        jawForward=0.20,
+        browDown_=1.0,
+        eyeWide_=0.55,
+        eyeSquint_=0.32,
+        noseSneer_=0.88,
+        mouthPress_=0.40,
+        mouthFrown_=0.68,
+        mouthStretch_=0.45,
+        jawOpen=0.26,
+        jawForward=0.25,
     ),
     "shock": sym(
-        eyeWide_=0.95,
+        eyeWide_=0.98,
         browInnerUp=0.95,
-        browOuterUp_=0.85,
-        jawOpen=0.60,
+        browOuterUp_=0.88,
+        jawOpen=0.62,
         mouthFunnel=0.25,
     ),
     "panic": sym(
         eyeWide_=1.0,
         browInnerUp=1.0,
-        browOuterUp_=0.80,
-        mouthStretch_=0.70,
-        mouthFrown_=0.45,
-        jawOpen=0.82,
-        mouthLowerDown_=0.55,
+        browOuterUp_=0.85,
+        mouthStretch_=0.72,
+        mouthFrown_=0.48,
+        jawOpen=0.85,
+        mouthLowerDown_=0.58,
     ),
 }
 
@@ -139,7 +141,7 @@ def _lerp(a: float, b: float, k: float) -> float:
 
 
 # =============================================================================
-# MATERIAL POLISH (TEETH FIX, KOSAN KAUS OBLONG RECOLOR, MATTE ENHANCED_SSS)
+# MATERIAL POLISH (TEETH FIX, KOSAN KAUS + CELANA PENDEK KOLOR, BAREFOOT SSS)
 # =============================================================================
 
 def _fix_teeth_materials() -> None:
@@ -168,13 +170,62 @@ def _fix_teeth_materials() -> None:
                 bsdf.inputs["Subsurface Weight"].default_value = 0.15
 
 
-def _style_kosan_outfit(cloth_obj: bpy.types.Object) -> None:
-    """Restyle male_casualsuit06 into a clean dark Indonesian kosan kaus oblong + dark pants.
+def _crop_pants_to_kosan_shorts(cloth_obj: bpy.types.Object, arm: bpy.types.Object) -> None:
+    """Trim lower pant legs below knee height to create authentic Indonesian kosan shorts (celana pendek)."""
+    import bmesh
+
+    upd()
+    # Knee height in armature local rest space (just above knee cap so calves & shins are bare!)
+    knee_z_local = float(arm.pose.bones["lowerleg01.L"].head.z) + 0.025
+    # Map evaluated vertex positions back to mesh vertex indices so cropping matches shape keys/rig
+    dg = bpy.context.evaluated_depsgraph_get()
+    # Temporarily disable Subsurf so vertex indices align 1:1 with cloth_obj.data.vertices
+    subsurf_states = []
+    for m in cloth_obj.modifiers:
+        if m.type == "SUBSURF":
+            subsurf_states.append((m, m.show_viewport, m.show_render))
+            m.show_viewport = False
+            m.show_render = False
+    upd()
+    eval_obj = cloth_obj.evaluated_get(dg)
+    eval_zs = [v.co.z for v in eval_obj.data.vertices]
+    for m, sv, sr in subsurf_states:
+        m.show_viewport = sv
+        m.show_render = sr
+
+    if len(eval_zs) == len(cloth_obj.data.vertices):
+        bm = bmesh.new()
+        bm.from_mesh(cloth_obj.data)
+        bm.verts.ensure_lookup_table()
+        del_faces = [
+            f for f in bm.faces
+            if (sum(eval_zs[v.index] for v in f.verts) / max(1, len(f.verts))) < knee_z_local
+        ]
+        if del_faces:
+            bmesh.ops.delete(bm, geom=del_faces, context="FACES")
+            # Remove any orphaned edges/verts left behind
+            loose_verts = [v for v in bm.verts if not v.link_faces]
+            if loose_verts:
+                bmesh.ops.delete(bm, geom=loose_verts, context="VERTS")
+            bm.to_mesh(cloth_obj.data)
+            cloth_obj.data.update()
+        bm.free()
+
+    # Add subtle Solidify so the shorts hem looks crisp & solid like cotton kolor fabric
+    if not any(m.type == "SOLIDIFY" for m in cloth_obj.modifiers):
+        sol = cloth_obj.modifiers.new("ShortsHemSolidify", "SOLIDIFY")
+        sol.thickness = 0.004
+        sol.offset = 1.0
+
+
+def _style_kosan_outfit(cloth_obj: bpy.types.Object, arm: bpy.types.Object) -> None:
+    """Convert male_casualsuit06 into Indonesian kosan kaus oblong + dark knee-length celana pendek kolor.
 
     Keeps the packed AO + Normal maps intact for realistic cloth creases while removing the
-    stock 'MR UDO' logo by shading UV.y > 0.58 (the tee band from paint_family.py) in dark
-    charcoal-navy cotton and darkening the lower denim band cleanly.
+    stock 'MR UDO' logo and cropping the pant legs at the knee.
     """
+    _crop_pants_to_kosan_shorts(cloth_obj, arm)
+
     # Ensure Displace 0.006 anti-poke-through modifier is present
     has_disp = any(m.type == "DISPLACE" for m in cloth_obj.modifiers)
     if not has_disp:
@@ -191,17 +242,12 @@ def _style_kosan_outfit(cloth_obj: bpy.types.Object) -> None:
         if not bsdf:
             continue
 
-        # Locate existing packed AO & diffuse textures
         ao_node = next(
             (n for n in nt.nodes if n.type == "TEX_IMAGE" and n.image and "ao" in n.image.name.lower()),
             None,
         )
-        diff_node = next(
-            (n for n in nt.nodes if n.type == "TEX_IMAGE" and n.image and "diffuse" in n.image.name.lower()),
-            None,
-        )
 
-        # Build UV.y > 0.58 mask: top band = kosan dark slate-navy tee, bottom band = dark charcoal pants
+        # UV.y > 0.58 = kaus oblong kosan (dark slate-navy cotton); UV.y <= 0.58 = celana pendek kolor gelap
         tc = nt.nodes.new("ShaderNodeTexCoord")
         sep = nt.nodes.new("ShaderNodeSeparateXYZ")
         nt.links.new(tc.outputs["UV"], sep.inputs["Vector"])
@@ -211,21 +257,6 @@ def _style_kosan_outfit(cloth_obj: bpy.types.Object) -> None:
         is_tee.inputs[1].default_value = 0.58
         nt.links.new(sep.outputs["Y"], is_tee.inputs[0])
 
-        # Pants color: darken existing jeans diffuse slightly for moody 2 AM look
-        pants_mix = nt.nodes.new("ShaderNodeMix")
-        pants_mix.data_type = "RGBA"
-        pants_mix.blend_type = "MULTIPLY"
-        pants_mix.inputs[0].default_value = 1.0
-        p_a = next(i for i in pants_mix.inputs if i.name == "A" and i.type == "RGBA")
-        p_b = next(i for i in pants_mix.inputs if i.name == "B" and i.type == "RGBA")
-        p_out = next(o for o in pants_mix.outputs if o.name == "Result" and o.type == "RGBA")
-        if diff_node:
-            nt.links.new(diff_node.outputs["Color"], p_a)
-        else:
-            p_a.default_value = (0.14, 0.16, 0.22, 1.0)
-        p_b.default_value = (0.36, 0.38, 0.44, 1.0)
-
-        # Blend pants (A) and clean dark slate-navy kaus oblong (B) using UV.y > 0.58 mask
         garment_mix = nt.nodes.new("ShaderNodeMix")
         garment_mix.data_type = "RGBA"
         garment_mix.blend_type = "MIX"
@@ -233,16 +264,16 @@ def _style_kosan_outfit(cloth_obj: bpy.types.Object) -> None:
         g_b = next(i for i in garment_mix.inputs if i.name == "B" and i.type == "RGBA")
         g_out = next(o for o in garment_mix.outputs if o.name == "Result" and o.type == "RGBA")
         nt.links.new(is_tee.outputs["Value"], garment_mix.inputs[0])
-        nt.links.new(p_out, g_a)
-        # Muted dark navy-charcoal kaus oblong (reads naturally against overhead backlight)
-        g_b.default_value = (0.09, 0.13, 0.18, 1.0)
+        # Celana pendek / kolor santai kosan: dark charcoal-black matte cotton
+        g_a.default_value = (0.045, 0.050, 0.062, 1.0)
+        # Kaus oblong kosan santai: muted dark slate-navy cotton
+        g_b.default_value = (0.085, 0.125, 0.175, 1.0)
 
-        # Multiply by packed AO map so every cloth crease & shadow fold pops realistically
         if ao_node:
             ao_mul = nt.nodes.new("ShaderNodeMix")
             ao_mul.data_type = "RGBA"
             ao_mul.blend_type = "MULTIPLY"
-            ao_mul.inputs[0].default_value = 0.85
+            ao_mul.inputs[0].default_value = 0.88
             a_a = next(i for i in ao_mul.inputs if i.name == "A" and i.type == "RGBA")
             a_b = next(i for i in ao_mul.inputs if i.name == "B" and i.type == "RGBA")
             a_out = next(o for o in ao_mul.outputs if o.name == "Result" and o.type == "RGBA")
@@ -256,29 +287,34 @@ def _style_kosan_outfit(cloth_obj: bpy.types.Object) -> None:
             nt.links.remove(link)
         nt.links.new(final_col, bsdf.inputs["Base Color"])
         if "Roughness" in bsdf.inputs:
-            bsdf.inputs["Roughness"].default_value = 0.82
+            bsdf.inputs["Roughness"].default_value = 0.86
         if "Coat Weight" in bsdf.inputs:
             bsdf.inputs["Coat Weight"].default_value = 0.0
 
 
-def _polish_skin_and_shoes(body_obj: bpy.types.Object, shoes_obj: Optional[bpy.types.Object]) -> None:
-    """Keep ENHANCED_SSS skin matte (never waxy) with warm natural Indonesian tone & dark shoes."""
+def _polish_skin_barefoot(body_obj: bpy.types.Object) -> None:
+    """Keep ENHANCED_SSS skin matte (never waxy) with warm natural Indonesian tone & reveal bare feet/calves."""
+    # Remove shoe & pant delete-mask modifiers on Kid_body so 100% real MPFB2 calves & bare feet render!
+    # Keep "Hide helpers" MASK modifier intact so MakeHuman helper geometry remains hidden.
+    for m in list(body_obj.modifiers):
+        if m.type == "MASK" and m.name.startswith("Delete."):
+            body_obj.modifiers.remove(m)
+
     def _walk_skin(nt: bpy.types.NodeTree) -> None:
         for n in nt.nodes:
             if n.type == "BSDF_PRINCIPLED":
                 if "Roughness" in n.inputs:
-                    n.inputs["Roughness"].default_value = max(n.inputs["Roughness"].default_value, 0.52)
+                    n.inputs["Roughness"].default_value = max(n.inputs["Roughness"].default_value, 0.54)
                 if "Coat Weight" in n.inputs:
                     n.inputs["Coat Weight"].default_value = 0.0
-                # Gentle warm Southeast Asian / Indonesian skin tint while preserving skin texture & SSS
                 bc = n.inputs.get("Base Color")
                 if bc and bc.links:
                     src_sock = bc.links[0].from_socket
                     if src_sock.node.type != "HUE_SAT":
                         hsv = nt.nodes.new("ShaderNodeHueSaturation")
-                        hsv.inputs["Hue"].default_value = 0.495
-                        hsv.inputs["Saturation"].default_value = 1.12
-                        hsv.inputs["Value"].default_value = 0.78
+                        hsv.inputs["Hue"].default_value = 0.494
+                        hsv.inputs["Saturation"].default_value = 1.14
+                        hsv.inputs["Value"].default_value = 0.74
                         nt.links.remove(bc.links[0])
                         nt.links.new(src_sock, hsv.inputs["Color"])
                         nt.links.new(hsv.outputs["Color"], bc)
@@ -288,24 +324,6 @@ def _polish_skin_and_shoes(body_obj: bpy.types.Object, shoes_obj: Optional[bpy.t
     for sl in body_obj.material_slots:
         if sl.material and sl.material.use_nodes and sl.material.node_tree:
             _walk_skin(sl.material.node_tree)
-
-    if shoes_obj:
-        for sl in shoes_obj.material_slots:
-            mat = sl.material
-            if not mat or not mat.use_nodes or not mat.node_tree:
-                continue
-            bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-            if bsdf and "Base Color" in bsdf.inputs:
-                bc = bsdf.inputs["Base Color"]
-                if bc.links:
-                    src = bc.links[0].from_socket
-                    hsv = mat.node_tree.nodes.new("ShaderNodeHueSaturation")
-                    hsv.inputs["Saturation"].default_value = 0.5
-                    hsv.inputs["Value"].default_value = 0.40
-                    mat.node_tree.links.remove(bc.links[0])
-                    mat.node_tree.links.new(src, hsv.inputs["Color"])
-                    mat.node_tree.links.new(hsv.outputs["Color"], bc)
-                bsdf.inputs["Roughness"].default_value = 0.68
 
 
 # =============================================================================
@@ -358,15 +376,12 @@ def load_mpfb2_human_base(
             o.hide_render = True
             o.hide_viewport = True
 
-    # Polish materials (teeth fix, kosan dark tee + jeans, warm matte SSS skin, dark shoes)
-    _fix_teeth_materials()
-    cloth_obj = bpy.data.objects.get("Human.male_casualsuit06")
-    if cloth_obj:
-        _style_kosan_outfit(cloth_obj)
-    shoes_obj = bpy.data.objects.get("Human.shoes05")
-    _polish_skin_and_shoes(body, shoes_obj)
+    # Delete shoes completely so character is 100% NYEKER / BAREFOOT (Indonesian kosan 2 AM!)
+    for o in list(bpy.data.objects):
+        if "shoes" in o.name.lower():
+            bpy.data.objects.remove(o, do_unlink=True)
 
-    # Clear existing animation & scale cleanly to adult Indonesian height (~1.68m)
+    # Clear existing animation & reset pose before cropping shorts / measuring barefoot soles
     arm.animation_data_clear()
     arm.rotation_mode = "XYZ"
     arm.location = (0.0, 0.0, 0.0)
@@ -377,10 +392,24 @@ def load_mpfb2_human_base(
             pb.constraints.remove(c)
     upd()
 
+    # Polish materials & outfit: teeth fix, knee-length kosan shorts + kaus oblong, barefoot matte SSS skin
+    _fix_teeth_materials()
+    cloth_obj = bpy.data.objects.get("Human.male_casualsuit06")
+    if cloth_obj:
+        _style_kosan_outfit(cloth_obj, arm)
+    _polish_skin_barefoot(body)
+    upd()
+
     current_h = max(0.5, float(arm.dimensions.z))
     rig_scale = target_height_m / current_h
     arm.scale = (rig_scale, rig_scale, rig_scale)
     upd()
+
+    # Measure exact lowest bare-foot sole Z in world space so barefoot soles sit FLUSH on Z=0.0!
+    dg = bpy.context.evaluated_depsgraph_get()
+    be = body.evaluated_get(dg)
+    bare_min_z = min((body.matrix_world @ v.co).z for v in be.data.vertices)
+    sole_z_shift = -bare_min_z  # positive shift if feet dipped below 0, negative if floating
 
     # Collect ONLY `!ex-*` ARKit shape keys (NEVER touch `$md-*` body keys!)
     exkeys = [k for k in body.data.shape_keys.key_blocks if k.name.startswith("!ex-")]
@@ -393,7 +422,8 @@ def load_mpfb2_human_base(
     for s in ("L", "R"):
         a_w = wp(arm, P[f"lowerleg02.{s}"].tail)
         frest = (arm.matrix_world @ P[f"foot.{s}"].matrix).to_3x3().normalized()
-        feet[s] = (abs(a_w.x), a_w.y, a_w.z, frest)
+        # Store exact ankle Z adjusted so bare sole sits flush on floor Z=0.0
+        feet[s] = (abs(a_w.x), a_w.y, a_w.z + sole_z_shift, frest)
 
     hip_w = (wp(arm, P["upperleg01.L"].head) + wp(arm, P["upperleg01.R"].head)) * 0.5
     thigh_len = (wp(arm, P["upperleg01.L"].head) - wp(arm, P["lowerleg01.L"].head)).length
@@ -428,13 +458,14 @@ def load_mpfb2_human_base(
         "hip": hip_w.copy(),
         "thigh": thigh_len,
         "shin": shin_len,
+        "sole_z_shift": sole_z_shift,
         "tg": tg,
         "rt": rt,
         "pl": pl,
     }
 
     # Calibrate knee pole angles on a deep squat so knees ALWAYS bend forward (never inward)
-    arm.location = (0.0, 0.0, -thigh_len * 0.65)
+    arm.location = (0.0, 0.0, sole_z_shift - thigh_len * 0.65)
     for s, sx in (("L", 1.0), ("R", -1.0)):
         fx, fy, fz, frest = feet[s]
         tg[s].location = (sx * fx, fy, fz)
@@ -453,10 +484,10 @@ def load_mpfb2_human_base(
                 best = (score, ang)
         assert best is not None
         c.pole_angle = math.radians(best[1])
-    arm.location = (0.0, 0.0, 0.0)
+    arm.location = (0.0, 0.0, sole_z_shift)
     upd()
 
-    # Pre-generate natural blink timestamps every 2.0..3.6s
+    # Pre-generate natural blink timestamps every 2.2..3.8s
     rnd = random.Random(19)
     blink_times: List[float] = []
     t_b = 1.15
@@ -522,14 +553,17 @@ def place_and_feet(
     hip_drop: float = 0.0,
     left_foot_override: Optional[Tuple[float, float, float, float]] = None,
     right_foot_override: Optional[Tuple[float, float, float, float]] = None,
+    stance_scale: float = 0.74,
+    stagger_y: float = 0.06,
 ) -> None:
-    """Place character root & key Leg IK targets (standing, crouching, or left-foot stomp!).
+    """Place character root & key Leg IK targets (natural athletic barefoot stance, never stiff wide A-stance).
 
     `*_foot_override` is `(world_x, world_y, lift_z, pitch_deg)` relative to ground.
     """
     arm = human["arm"]
     R = human["leg_ik"]
-    arm.location = (loc[0], loc[1], loc[2] - hip_drop)
+    base_z = loc[2] + R.get("sole_z_shift", 0.0)
+    arm.location = (loc[0], loc[1], base_z - hip_drop)
     arm.rotation_euler = (0.0, 0.0, math.radians(yaw_deg))
     arm.keyframe_insert("location", frame=frame)
     arm.keyframe_insert("rotation_euler", frame=frame)
@@ -543,13 +577,16 @@ def place_and_feet(
             rot_m = Rz(yaw_deg) @ Matrix.Rotation(math.radians(pitch_deg), 3, X) @ frest
             R["rt"][s].rotation_euler = rot_m.to_euler()
         else:
-            p = loc_v + Rz(yaw_deg) @ Vector((sx * fx, fy, 0.0))
+            # Slight natural stride stagger (left foot slightly forward, right back) -> natural hunter stance!
+            dy = -stagger_y if s == "L" else stagger_y
+            p = loc_v + Rz(yaw_deg) @ Vector((sx * fx * stance_scale, fy + dy, 0.0))
             R["tg"][s].location = (p.x, p.y, fz)
-            R["rt"][s].rotation_euler = (Rz(yaw_deg) @ frest).to_euler()
+            foot_yaw = yaw_deg + (6.0 if s == "L" else -8.0)
+            R["rt"][s].rotation_euler = (Rz(foot_yaw) @ frest).to_euler()
         R["tg"][s].keyframe_insert("location", frame=frame)
         R["rt"][s].keyframe_insert("rotation_euler", frame=frame)
 
-        R["pl"][s].location = loc_v + Rz(yaw_deg) @ Vector((sx * 0.16 * human["scale"], -1.2, R["hip"].z * 0.5))
+        R["pl"][s].location = loc_v + Rz(yaw_deg) @ Vector((sx * 0.14 * human["scale"], -1.2, R["hip"].z * 0.5))
         R["pl"][s].keyframe_insert("location", frame=frame)
     upd()
 
@@ -695,15 +732,17 @@ def snap_sandal_to_right_hand(
     human: Dict[str, Any],
     sandal_root: bpy.types.Object,
     frame: int,
-    extra_pitch_deg: float = 0.0,
-    extra_roll_deg: float = 0.0,
+    aim_sole_dir: Optional[Vector] = None,
+    blade_dir_hint: Optional[Vector] = None,
 ) -> Vector:
-    """Position & orient `sandal_jepit_swallow` directly from `wrist.R` world palm frame.
+    """Position & orient `sandal_jepit_swallow` in a firm heel power-grip directly from `wrist.R`.
 
-    Strictly follows TROUBLESHOOTING.md:
-      `pos = wrist.head + palm_dir * 0.055 * scale + up * 0.045 * scale`
-    with orthonormal basis built from `(knuckle_vec, palm_dir, palm_normal)` so the flip-flop
-    is gripped firmly in the hand on EVERY frame (zero floating!).
+    - Computes exact palm grip center from `wrist.R`: `grip = w0 + palm_dir * 0.055 * s + palm_normal * 0.045 * s`
+    - Shifts the flip-flop center `+0.105m` along its blade axis (`+Y`) so the **heel/base** (`y = -0.105`)
+      sits firmly inside the closed fist with ZERO fingers penetrating the sole, while the broad flip-flop
+      extends outward ready to swat!
+    - When `aim_sole_dir` is given (e.g. pointing straight down/toward the cockroach), orients the flat
+      green rubber striking surface (`-Z` of sandal) directly along `aim_sole_dir` (never edge-on!).
     """
     arm = human["arm"]
     s = human["scale"]
@@ -716,7 +755,7 @@ def snap_sandal_to_right_hand(
 
     f2 = wp(arm, P["finger2-1.R"].head)
     f5 = wp(arm, P["finger5-1.R"].head)
-    knuckle = (f2 - f5)
+    knuckle = f2 - f5
     if knuckle.length < 1e-5:
         knuckle = (arm.matrix_world.to_3x3() @ wb.matrix.to_3x3() @ Vector((1.0, 0.0, 0.0))).normalized()
     else:
@@ -727,26 +766,44 @@ def snap_sandal_to_right_hand(
         palm_normal = Vector((0.0, 0.0, 1.0))
     else:
         palm_normal = palm_normal.normalized()
-    knuckle = palm_normal.cross(palm_dir).normalized()
 
-    # Exact Zack-Blender-Pack hand-anchor offset (scaled to adult rig)
-    pos = w0 + palm_dir * (0.055 * s) + palm_normal * (0.045 * s)
+    # Exact Zack-Blender-Pack hand-anchor point at the closed fist palm
+    grip_pt = w0 + palm_dir * (0.055 * s) + palm_normal * (0.032 * s)
 
-    # Orient sandal: +Y along palm_dir (heel in hand, toe extending outward like a weapon!),
-    # +X across knuckles, +Z along palm_normal (green rubber sole facing striking direction)
+    # Construct orthonormal sandal basis:
+    #   sandal -Z = green rubber bottom sole (striking face!)
+    #   sandal +Z = white footbed + green V-strap
+    #   sandal +Y = heel -> toe blade axis (length 0.27m)
+    #   sandal +X = width across sole (0.10m)
+    if aim_sole_dir is not None and aim_sole_dir.length > 1e-4:
+        # Sandal +Z points opposite to striking direction so flat green bottom (-Z) aims straight at target!
+        s_z = (-aim_sole_dir).normalized()
+        b_hint = blade_dir_hint if (blade_dir_hint is not None and blade_dir_hint.length > 1e-4) else palm_dir
+        s_y = b_hint - s_z * b_hint.dot(s_z)
+        if s_y.length < 1e-4:
+            s_y = Vector((0.0, 0.0, 1.0)) - s_z * s_z.z
+        s_y = s_y.normalized()
+        s_x = s_y.cross(s_z).normalized()
+        s_y = s_z.cross(s_x).normalized()
+    else:
+        s_y = palm_dir
+        s_z = palm_normal
+        s_x = s_y.cross(s_z).normalized()
+        s_z = s_x.cross(s_y).normalized()
+
     basis = Matrix((
-        (knuckle.x, palm_dir.x, palm_normal.x),
-        (knuckle.y, palm_dir.y, palm_normal.y),
-        (knuckle.z, palm_dir.z, palm_normal.z),
+        (s_x.x, s_y.x, s_z.x),
+        (s_x.y, s_y.y, s_z.y),
+        (s_x.z, s_y.z, s_z.z),
     ))
-    if abs(extra_pitch_deg) > 1e-3:
-        basis = basis @ Matrix.Rotation(math.radians(extra_pitch_deg), 3, X)
-    if abs(extra_roll_deg) > 1e-3:
-        basis = basis @ Matrix.Rotation(math.radians(extra_roll_deg), 3, Y)
+
+    # Offset sandal center +0.10m along blade (+Y) & slightly out along footbed (+Z) so heel sits
+    # cleanly inside the fist with zero finger-through-sole intersection!
+    center_pos = grip_pt + s_y * 0.095 + s_z * 0.010
 
     sandal_root.rotation_mode = "QUATERNION"
-    sandal_root.location = pos
+    sandal_root.location = center_pos
     sandal_root.rotation_quaternion = basis.to_quaternion()
     sandal_root.keyframe_insert("location", frame=frame)
     sandal_root.keyframe_insert("rotation_quaternion", frame=frame)
-    return pos
+    return grip_pt

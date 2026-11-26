@@ -428,30 +428,72 @@ def build_kitchen_tile_floor(
     counter_wood_mat = make_material("Mat_Kosan_CounterBody", (0.22, 0.16, 0.12, 1.0), roughness=0.58)
     counter_top_mat = make_material("Mat_Kosan_CounterTop", (0.34, 0.33, 0.31, 1.0), roughness=0.28, coat=0.25)
 
-    # Left wall at x = -0.92m (tight kosan kitchen corridor, clear of camera!)
-    _make_beveled_box("Wall_Left", (0.12, 7.2, 2.8), 0.005, wall_mat, root, (-0.98, 1.8, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Left", (0.02, 7.2, 0.10), 0.004, baseboard_mat, root, (-0.91, 1.8, 0.05), collection=collection)
+    # Left wall widened to x = -1.32m (comfortable Indonesian kosan kitchen, not a cramped tunnel!)
+    _make_beveled_box("Wall_Left", (0.12, 7.6, 2.8), 0.005, wall_mat, root, (-1.38, 1.8, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Left", (0.02, 7.6, 0.10), 0.004, baseboard_mat, root, (-1.31, 1.8, 0.05), collection=collection)
 
     # Back wall behind fridge at y = 3.55m
-    _make_beveled_box("Wall_Back", (4.0, 0.12, 2.8), 0.005, wall_mat, root, (0.5, 3.61, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Back", (4.0, 0.02, 0.10), 0.004, baseboard_mat, root, (0.5, 3.54, 0.05), collection=collection)
+    _make_beveled_box("Wall_Back", (4.6, 0.12, 2.8), 0.005, wall_mat, root, (0.35, 3.61, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Back", (4.6, 0.02, 0.10), 0.004, baseboard_mat, root, (0.35, 3.54, 0.05), collection=collection)
 
-    # Right wall at x = 1.68m
-    _make_beveled_box("Wall_Right", (0.12, 7.2, 2.8), 0.005, wall_mat, root, (1.74, 1.8, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Right", (0.02, 7.2, 0.10), 0.004, baseboard_mat, root, (1.67, 1.8, 0.05), collection=collection)
+    # Right wall widened to x = 1.92m
+    _make_beveled_box("Wall_Right", (0.12, 7.6, 2.8), 0.005, wall_mat, root, (1.98, 1.8, 1.4), collection=collection)
+    _make_beveled_box("Baseboard_Right", (0.02, 7.6, 0.10), 0.004, baseboard_mat, root, (1.91, 1.8, 0.05), collection=collection)
 
     # Front wall behind camera start at y = -1.6m (prevents empty void reflections!)
-    _make_beveled_box("Wall_Front", (4.0, 0.12, 2.8), 0.005, wall_mat, root, (0.5, -1.65, 1.4), collection=collection)
+    _make_beveled_box("Wall_Front", (4.6, 0.12, 2.8), 0.005, wall_mat, root, (0.35, -1.65, 1.4), collection=collection)
 
-    # Compact Indonesian kosan concrete/wood kitchen counter along right wall (x=1.08..1.66, y=-0.3..1.45, z=0..0.82)
-    _make_beveled_box("Kosan_Counter_Base", (0.56, 1.75, 0.78), 0.006, counter_wood_mat, root, (1.38, 0.58, 0.39), collection=collection)
-    _make_beveled_box("Kosan_Counter_Top", (0.60, 1.80, 0.045), 0.006, counter_top_mat, root, (1.36, 0.58, 0.805), collection=collection)
-    # Floating wall shelf above counter (holds bowls, jug, tea set)
-    _make_beveled_box("Kosan_Wall_Shelf", (0.24, 1.40, 0.03), 0.004, counter_wood_mat, root, (1.54, 0.60, 1.48), collection=collection)
+    # Indonesian kosan concrete/wood kitchen counter along right wall (x=1.32..1.90, y=-0.3..1.45, z=0..0.82)
+    _make_beveled_box("Kosan_Counter_Base", (0.56, 1.75, 0.78), 0.006, counter_wood_mat, root, (1.62, 0.58, 0.39), collection=collection)
+    _make_beveled_box("Kosan_Counter_Top", (0.60, 1.80, 0.045), 0.006, counter_top_mat, root, (1.60, 0.58, 0.805), collection=collection)
+    # Floating wall shelf above counter
+    _make_beveled_box("Kosan_Wall_Shelf", (0.24, 1.45, 0.03), 0.004, counter_wood_mat, root, (1.78, 0.60, 1.48), collection=collection)
+
+    # Wall Detail 1: Classic Indonesian Broco Light Switch on back wall (left of fridge) & left wall
+    switch_plate_mat = make_material("Mat_Switch_Plate", (0.76, 0.75, 0.72, 1.0), roughness=0.32)
+    switch_key_mat = make_material("Mat_Switch_Key", (0.68, 0.67, 0.64, 1.0), roughness=0.35)
+    for idx, (sx, sy, sz, rot_z) in enumerate([
+        (-0.84, 3.535, 1.24, 0.0),
+        (-1.305, 1.85, 1.24, math.radians(90.0)),
+    ]):
+        sw_root = _make_empty(f"Wall_LightSwitch_{idx}", (sx, sy, sz), parent=root, collection=collection)
+        sw_root.rotation_euler = (0.0, 0.0, rot_z)
+        _make_beveled_box(f"Switch_Plate_{idx}", (0.085, 0.012, 0.085), 0.003, switch_plate_mat, sw_root, (0.0, 0.0, 0.0), collection=collection)
+        _make_beveled_box(f"Switch_Rocker_{idx}", (0.022, 0.016, 0.042), 0.002, switch_key_mat, sw_root, (0.0, -0.006, 0.0), (math.radians(8.0), 0.0, 0.0), collection=collection)
+
+    # Wall Detail 2: Classic Indonesian Kosan Wall Calendar (red header + crisp date grid) on back wall
+    cal_root = _make_empty("Kosan_WallCalendar", (-0.86, 3.535, 1.82), parent=root, collection=collection)
+    cal_red = make_material("Mat_Calendar_Red", (0.62, 0.09, 0.08, 1.0), roughness=0.55)
+    cal_paper = make_material("Mat_Calendar_Paper", (0.76, 0.74, 0.70, 1.0), roughness=0.72)
+    cal_ink = make_material("Mat_Calendar_Ink", (0.12, 0.12, 0.14, 1.0), roughness=0.80)
+    cal_metal = make_material("Mat_Calendar_Clamp", (0.45, 0.46, 0.48, 1.0), roughness=0.30, metallic=0.85)
+    _make_beveled_box("Calendar_Clamp", (0.34, 0.010, 0.016), 0.002, cal_metal, cal_root, (0.0, -0.003, 0.215), collection=collection)
+    _make_beveled_box("Calendar_Header", (0.33, 0.006, 0.085), 0.001, cal_red, cal_root, (0.0, -0.002, 0.165), collection=collection)
+    _make_beveled_box("Calendar_Body", (0.33, 0.006, 0.34), 0.001, cal_paper, cal_root, (0.0, -0.002, -0.045), collection=collection)
+    for row_i in range(5):
+        _make_beveled_box(
+            f"Calendar_Row_{row_i}",
+            (0.28, 0.003, 0.004),
+            0.0,
+            cal_ink,
+            cal_root,
+            (0.0, -0.006, 0.075 - row_i * 0.052),
+            collection=collection,
+        )
+    for col_i in range(7):
+        _make_beveled_box(
+            f"Calendar_Col_{col_i}",
+            (0.003, 0.003, 0.22),
+            0.0,
+            cal_ink,
+            cal_root,
+            (-0.135 + col_i * 0.045, -0.006, -0.03),
+            collection=collection,
+        )
 
     # Ceiling + Classic Indonesian TL Fluorescent Tube Fixture directly overhead
-    ceil_mat = make_material("Mat_Ceiling", (0.54, 0.55, 0.56, 1.0), roughness=0.88)
-    _make_beveled_box("Ceiling", (4.2, 7.2, 0.10), 0.0, ceil_mat, root, (0.4, 1.8, 2.75), collection=collection)
+    ceil_mat = make_material("Mat_Ceiling", (0.50, 0.51, 0.52, 1.0), roughness=0.88)
+    _make_beveled_box("Ceiling", (4.6, 7.6, 0.10), 0.0, ceil_mat, root, (0.35, 1.8, 2.75), collection=collection)
 
     fixture_mat = make_material("Mat_Neon_Fixture", (0.62, 0.64, 0.66, 1.0), roughness=0.35, metallic=0.6)
     _make_beveled_box("Neon_Housing", (0.09, 1.25, 0.045), 0.006, fixture_mat, root, (0.0, 2.05, 2.67), collection=collection)
@@ -580,7 +622,7 @@ def build_indomie_bowl_spill(
         bowl_mat,
         True,
         root,
-        (-0.14, 0.13, 0.052),
+        (-0.28, 0.06, 0.052),
         (math.radians(74.0), math.radians(-18.0), math.radians(-38.0)),
         collection=collection,
     )
@@ -680,52 +722,92 @@ def build_cockroach_antennae_rig(
     camera_obj: Optional[bpy.types.Object] = None,
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Build two expressive curved antennae + two foldable translucent wings in camera local space.
+    """Build sharp glossy segmented cockroach antennae + tiny front leg tips + translucent veined wings.
 
     Blender camera local axes: +X right, +Y up, -Z forward.
     """
     rig_root = _make_empty("Cockroach_POV_Rig", (0.0, 0.0, 0.0), parent=camera_obj, collection=collection)
 
+    # Rich dark glossy mahogany-brown chitin material (always crisp dark brown, never blows out white!)
     chitin_mat = make_material(
         "Mat_Cockroach_Antenna",
-        (0.14, 0.045, 0.015, 1.0),
-        roughness=0.22,
-        coat=0.80,
+        (0.055, 0.016, 0.005, 1.0),
+        roughness=0.30,
+        coat=0.32,
+    )
+    segment_mat = make_material(
+        "Mat_Cockroach_Segment",
+        (0.022, 0.006, 0.002, 1.0),
+        roughness=0.34,
+        coat=0.28,
     )
     wing_mat = make_material(
         "Mat_Cockroach_Wing",
-        (0.26, 0.12, 0.03, 1.0),
-        roughness=0.26,
-        coat=0.55,
-        alpha=0.35,
-        transmission=0.15,
+        (0.24, 0.10, 0.022, 1.0),
+        roughness=0.28,
+        coat=0.35,
+        alpha=0.36,
+        transmission=0.12,
     )
     vein_mat = make_material(
         "Mat_Cockroach_WingVein",
-        (0.12, 0.05, 0.015, 1.0),
-        roughness=0.35,
-        alpha=0.55,
+        (0.08, 0.03, 0.008, 1.0),
+        roughness=0.36,
+        alpha=0.60,
     )
 
-    ant_l_pivot = _make_empty("Ant_Left_Pivot", (-0.032, -0.046, -0.044), parent=rig_root, collection=collection)
-    ant_r_pivot = _make_empty("Ant_Right_Pivot", (0.032, -0.046, -0.044), parent=rig_root, collection=collection)
+    ant_l_pivot = _make_empty("Ant_Left_Pivot", (-0.030, -0.044, -0.048), parent=rig_root, collection=collection)
+    ant_r_pivot = _make_empty("Ant_Right_Pivot", (0.030, -0.044, -0.048), parent=rig_root, collection=collection)
 
-    # Graceful tapered whip-like curved antennae emerging from bottom-left & bottom-right corners
+    # Graceful outward-sweeping tapered insect antennae framing left & right edges (never forming a center arch!)
     left_pts = [
         (0.000, 0.000, 0.000, 1.15),
-        (-0.004, 0.011, -0.018, 0.90),
-        (-0.009, 0.022, -0.040, 0.68),
-        (-0.011, 0.029, -0.066, 0.45),
-        (-0.006, 0.030, -0.092, 0.25),
-        (0.002, 0.025, -0.114, 0.10),
+        (-0.004, 0.010, -0.020, 0.88),
+        (-0.009, 0.020, -0.044, 0.65),
+        (-0.014, 0.029, -0.070, 0.42),
+        (-0.018, 0.035, -0.096, 0.24),
+        (-0.024, 0.038, -0.120, 0.10),
     ]
     right_pts = [(-x, y, z, r) for (x, y, z, r) in left_pts]
 
-    _make_tube_curve("Cockroach_Antenna_L", left_pts, 0.0014, chitin_mat, resolution=12, bevel_res=4, parent=ant_l_pivot, collection=collection)
-    _make_tube_curve("Cockroach_Antenna_R", right_pts, 0.0014, chitin_mat, resolution=12, bevel_res=4, parent=ant_r_pivot, collection=collection)
+    ant_l_curve = _make_tube_curve("Cockroach_Antenna_L", left_pts, 0.00135, chitin_mat, resolution=14, bevel_res=5, parent=ant_l_pivot, collection=collection)
+    ant_r_curve = _make_tube_curve("Cockroach_Antenna_R", right_pts, 0.00135, chitin_mat, resolution=14, bevel_res=5, parent=ant_r_pivot, collection=collection)
+
+    # Subtle glossy dark chitin segment rings along mid-antenna so insect segmentation reads crisply
+    for side_tag, pts, piv in (("L", left_pts, ant_l_pivot), ("R", right_pts, ant_r_pivot)):
+        for seg_idx in (1, 2, 3):
+            px, py, pz, pr = pts[seg_idx]
+            bm_r = bmesh.new()
+            bmesh.ops.create_icosphere(bm_r, subdivisions=1, radius=0.00165 * pr)
+            _new_mesh_obj(f"Cockroach_AntSeg_{side_tag}_{seg_idx}", bm_r, segment_mat, True, piv, (px, py, pz), collection=collection)
+
+    # Subtle front tarsus leg tips peeking at very bottom-left / bottom-right edge (Scenes 1, 4, 5)
+    leg_l_pivot = _make_empty("LegTip_Left_Pivot", (-0.028, -0.056, -0.056), parent=rig_root, collection=collection)
+    leg_r_pivot = _make_empty("LegTip_Right_Pivot", (0.028, -0.056, -0.056), parent=rig_root, collection=collection)
+    leg_l_pts = [
+        (-0.012, -0.006, 0.008, 1.0),
+        (-0.003, 0.004, -0.012, 0.72),
+        (0.007, 0.007, -0.032, 0.45),
+        (0.013, 0.002, -0.044, 0.22),
+    ]
+    leg_r_pts = [(-x, y, z, r) for (x, y, z, r) in leg_l_pts]
+    leg_l = _make_tube_curve("Cockroach_LegTip_L", leg_l_pts, 0.0011, chitin_mat, resolution=8, bevel_res=3, parent=leg_l_pivot, collection=collection)
+    leg_r = _make_tube_curve("Cockroach_LegTip_R", leg_r_pts, 0.0011, chitin_mat, resolution=8, bevel_res=3, parent=leg_r_pivot, collection=collection)
+    # Tiny spiny tibial bristles along front leg tips for unmistakable insect silhouette
+    for side_tag, s_sign, leg_obj in (("L", -1.0, leg_l), ("R", 1.0, leg_r)):
+        for b_i, (bx, by, bz) in enumerate([(0.002 * -s_sign, 0.005, -0.018), (0.007 * -s_sign, 0.006, -0.030)]):
+            _make_tube_curve(
+                f"Cockroach_LegSpine_{side_tag}_{b_i}",
+                [(bx, by, bz, 0.8), (bx - s_sign * 0.004, by + 0.004, bz - 0.004, 0.15)],
+                0.00045,
+                segment_mat,
+                resolution=4,
+                bevel_res=2,
+                parent=leg_obj,
+                collection=collection,
+            )
 
     # Translucent amber-brown insect wings anchored at bottom-left/bottom-right camera edges
-    # (blurred gently by macro DOF so they read as OUR wings, never white wings behind the human)
     wing_l_pivot = _make_empty("Wing_Left_Pivot", (-0.028, -0.034, -0.048), parent=rig_root, collection=collection)
     wing_r_pivot = _make_empty("Wing_Right_Pivot", (0.028, -0.034, -0.048), parent=rig_root, collection=collection)
 
@@ -746,7 +828,6 @@ def build_cockroach_antennae_rig(
         bmesh.ops.translate(bm, verts=ext_verts, vec=Vector((0.0, 0.0005, 0.0)))
         w_obj = _new_mesh_obj(name, bm, wing_mat, True, parent, collection=collection)
 
-        # Subtle chitin vein ribs along the wing membrane
         for v_idx, tip in enumerate([(side * 0.022, -0.004, -0.054), (side * 0.014, -0.014, -0.042)]):
             _make_tube_curve(
                 f"{name}_Vein_{v_idx}",
@@ -767,11 +848,73 @@ def build_cockroach_antennae_rig(
         "root": rig_root,
         "ant_l": ant_l_pivot,
         "ant_r": ant_r_pivot,
+        "leg_l_pivot": leg_l_pivot,
+        "leg_r_pivot": leg_r_pivot,
+        "leg_l": leg_l,
+        "leg_r": leg_r,
         "wing_l_pivot": wing_l_pivot,
         "wing_r_pivot": wing_r_pivot,
         "wing_l": wing_l,
         "wing_r": wing_r,
     }
+
+
+def build_cockroach_shadow_caster(
+    location: Tuple[float, float, float] = (0.0, 0.04, 0.014),
+    collection: Optional[bpy.types.Collection] = None,
+) -> Dict[str, bpy.types.Object]:
+    """Build an invisible-to-camera cockroach body + 6 legs + 2 antennae that casts an unmistakable
+    insect silhouette shadow onto the ceramic floor & Indomie spill in Scene 1!
+    """
+    root = _make_empty("Cockroach_ShadowCaster_Root", location, collection=collection)
+    shad_mat = make_material("Mat_Cockroach_Shadow", (0.02, 0.01, 0.01, 1.0), roughness=0.9)
+
+    def _shadow_only(obj: bpy.types.Object) -> bpy.types.Object:
+        obj.visible_camera = False
+        obj.visible_diffuse = False
+        obj.visible_glossy = False
+        obj.visible_transmission = False
+        obj.visible_shadow = True
+        return obj
+
+    # Elongated oval cockroach body (length ~5.2cm, width ~2.0cm)
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=2, radius=1.0)
+    bmesh.ops.scale(bm, vec=Vector((0.013, 0.028, 0.006)), verts=bm.verts)
+    _shadow_only(_new_mesh_obj("Cockroach_Shadow_Body", bm, shad_mat, True, root, (0.0, 0.0, 0.0), collection=collection))
+
+    # Pronotum / head shield
+    bm_h = bmesh.new()
+    bmesh.ops.create_icosphere(bm_h, subdivisions=2, radius=1.0)
+    bmesh.ops.scale(bm_h, vec=Vector((0.009, 0.010, 0.005)), verts=bm_h.verts)
+    _shadow_only(_new_mesh_obj("Cockroach_Shadow_Head", bm_h, shad_mat, True, root, (0.0, 0.028, 0.0), collection=collection))
+
+    # 6 spiky bent insect legs (3 left, 3 right) -> iconic cockroach shadow silhouette!
+    for side_tag, sx in (("L", -1.0), ("R", 1.0)):
+        for l_idx, (y0, y_mid, y_tip, span) in enumerate([
+            (0.018, 0.028, 0.042, 0.032),   # front leg
+            (0.002, 0.000, -0.010, 0.038),  # mid leg
+            (-0.016, -0.028, -0.046, 0.042),  # hind leg
+        ]):
+            pts = [
+                (sx * 0.010, y0, 0.0, 1.0),
+                (sx * (span * 0.68), y_mid, 0.004, 0.75),
+                (sx * span, y_tip, -0.008, 0.45),
+            ]
+            _shadow_only(
+                _make_tube_curve(f"Cockroach_Shadow_Leg_{side_tag}_{l_idx}", pts, 0.0018, shad_mat, resolution=4, bevel_res=2, parent=root, collection=collection)
+            )
+        # 2 long sweeping antennae
+        ant_pts = [
+            (sx * 0.004, 0.034, 0.001, 1.0),
+            (sx * 0.018, 0.056, 0.004, 0.75),
+            (sx * 0.034, 0.088, 0.002, 0.45),
+        ]
+        _shadow_only(
+            _make_tube_curve(f"Cockroach_Shadow_Ant_{side_tag}", ant_pts, 0.0012, shad_mat, resolution=6, bevel_res=2, parent=root, collection=collection)
+        )
+
+    return {"root": root}
 
 
 # =============================================================================
@@ -792,25 +935,17 @@ def build_fridge_under_gap(
     void_mat = make_material("Mat_UnderGap_ShadowVoid", (0.006, 0.007, 0.010, 1.0), roughness=0.98)
 
     gap_h = 0.055  # 5.5 cm dark refuge gap for 1.5cm cockroach!
-    # 4 rubber leveling feet
     for fx in (-0.25, 0.25):
         for fy in (-0.25, 0.25):
             bm_f = bmesh.new()
             bmesh.ops.create_cone(bm_f, cap_ends=True, segments=12, radius1=0.028, radius2=0.022, depth=gap_h)
             _new_mesh_obj(f"Fridge_Foot_{fx:+.2f}_{fy:+.2f}", bm_f, rubber_mat, True, root, (fx, fy, gap_h * 0.5), collection=collection)
 
-    # Main fridge chassis sitting cleanly at z = gap_h (0.055m -> 1.485m)
     _make_beveled_box("Fridge_Chassis", (0.60, 0.60, 1.43), 0.018, body_mat, root, (0.0, 0.0, gap_h + 0.715), collection=collection)
-
-    # Lower main door + upper freezer door facing -Y
     _make_beveled_box("Fridge_Door_Lower", (0.58, 0.045, 0.90), 0.012, body_mat, root, (0.0, -0.315, gap_h + 0.46), collection=collection)
     _make_beveled_box("Fridge_Door_Upper", (0.58, 0.045, 0.47), 0.012, body_mat, root, (0.0, -0.315, gap_h + 1.175), collection=collection)
-
-    # Vertical chrome handles
     _make_beveled_box("Fridge_Handle_Lower", (0.022, 0.032, 0.22), 0.006, chrome_mat, root, (0.24, -0.352, gap_h + 0.76), collection=collection)
     _make_beveled_box("Fridge_Handle_Upper", (0.022, 0.032, 0.14), 0.006, chrome_mat, root, (0.24, -0.352, gap_h + 1.03), collection=collection)
-
-    # Deep black shadow recess tucked inside under-gap so the "safe dark tunnel" reads instantly
     _make_beveled_box("Fridge_UnderGap_Void", (0.48, 0.42, gap_h * 0.94), 0.0, void_mat, root, (0.0, 0.06, gap_h * 0.48), collection=collection)
 
     return {"root": root}
@@ -859,22 +994,23 @@ def build_dust_puff(
     location: Tuple[float, float, float] = (0.0, 0.35, 0.02),
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Impact dust cloud ring that bursts outward when sandal slams floor (Scene 4)."""
+    """Airy, semi-transparent low impact dust puffs bursting outward when sandal slams (Scene 4)."""
     root = _make_empty("Dust_Puff_Root", location, collection=collection)
-    dust_mat = make_material("Mat_Dust_Puff", (0.62, 0.59, 0.54, 1.0), roughness=0.92, alpha=0.68)
+    dust_mat = make_material("Mat_Dust_Puff", (0.56, 0.52, 0.46, 1.0), roughness=0.96, alpha=0.22)
     puffs = []
-    for i in range(10):
-        ang = (2.0 * math.pi * i) / 10.0
-        r = 0.09 + 0.03 * (i % 2)
+    for i in range(16):
+        ang = (2.0 * math.pi * i) / 16.0
+        r = 0.10 + 0.06 * (i % 3)
         bm = bmesh.new()
-        bmesh.ops.create_icosphere(bm, subdivisions=1, radius=0.032 + 0.008 * (i % 3))
+        bmesh.ops.create_icosphere(bm, subdivisions=2, radius=0.015 + 0.009 * (i % 3))
+        bmesh.ops.scale(bm, vec=Vector((1.35, 1.15, 0.72)), verts=bm.verts)
         p_obj = _new_mesh_obj(
             f"Dust_Cloud_{i:02d}",
             bm,
             dust_mat,
-            False,
+            True,
             root,
-            (r * math.cos(ang), r * math.sin(ang), 0.025 + 0.015 * (i % 2)),
+            (r * math.cos(ang), r * math.sin(ang), 0.014 + 0.014 * (i % 3)),
             collection=collection,
         )
         puffs.append(p_obj)
@@ -885,26 +1021,32 @@ def build_speed_lines_rig(
     camera_obj: Optional[bpy.types.Object] = None,
     collection: Optional[bpy.types.Collection] = None,
 ) -> Dict[str, bpy.types.Object]:
-    """Subtle, thin semi-transparent radial speed-lines strictly around outer screen edges."""
+    """Subtle, thin semi-transparent radial speed-lines strictly around top & side outer frame edges.
+
+    Intentionally excludes the lower-center zone (`sin(ang) < -0.45`) so no stray vertical lines
+    ever cut across the human's chest/shirt in Scene 8!
+    """
     root = _make_empty("Speed_Lines_Root", (0.0, 0.0, 0.0), parent=camera_obj, collection=collection)
     line_mat = make_material(
         "Mat_Speed_Lines",
         (0.88, 0.94, 1.0, 1.0),
         roughness=0.15,
         emission_color=(0.78, 0.90, 1.0, 1.0),
-        emission_strength=1.8,
-        alpha=0.22,
+        emission_strength=1.5,
+        alpha=0.18,
     )
     for i in range(12):
         ang = (2.0 * math.pi * i) / 12.0
-        rx = 0.105 * math.cos(ang)
-        ry = 0.155 * math.sin(ang)
+        if math.sin(ang) < -0.45:
+            continue  # Keep lower-center frame 100% clean (no vertical streaks over shirt!)
+        rx = 0.145 * math.cos(ang)
+        ry = 0.195 * math.sin(ang)
         pts = [
-            (rx * 1.18, ry * 1.18, -0.09, 0.15),
-            (rx * 0.98, ry * 0.98, -0.18, 0.65),
-            (rx * 0.88, ry * 0.88, -0.26, 0.10),
+            (rx * 1.15, ry * 1.15, -0.09, 0.12),
+            (rx * 0.98, ry * 0.98, -0.18, 0.55),
+            (rx * 0.90, ry * 0.90, -0.26, 0.08),
         ]
-        _make_tube_curve(f"Speed_Line_{i:02d}", pts, 0.00028, line_mat, resolution=4, bevel_res=2, parent=root, collection=collection)
+        _make_tube_curve(f"Speed_Line_{i:02d}", pts, 0.00024, line_mat, resolution=4, bevel_res=2, parent=root, collection=collection)
     return {"root": root}
 
 

@@ -67,8 +67,8 @@ def configure_render_engine(
 
     # Resolution & sample presets
     if mode == "storyboard":
-        res_x, res_y = 360, 640
-        cyc_samples, eevee_samples = 10, 16
+        res_x, res_y = 450, 800
+        cyc_samples, eevee_samples = 12, 16
         max_bounces = 3
     elif mode == "preview":
         res_x, res_y = 540, 960
@@ -201,7 +201,7 @@ def configure_render_engine(
 # =============================================================================
 
 def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str, Any]:
-    """Configure dim night-blue ambient (0.05-0.10) + overhead neon + dramatic boss backlight."""
+    """Configure dim night-blue ambient (0.05-0.11) + overhead neon + dramatic boss backlight + roach shadow spot."""
     world = bpy.data.worlds.new("MicroPOV_World")
     scene.world = world
     world.use_nodes = True
@@ -223,37 +223,39 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
         sock_a = next(i for i in mix.inputs if i.name == "A" and i.type == "RGBA")
         sock_b = next(i for i in mix.inputs if i.name == "B" and i.type == "RGBA")
         sock_out = next(o for o in mix.outputs if o.name == "Result" and o.type == "RGBA")
-        sock_b.default_value = (0.14, 0.25, 0.52, 1.0)
+        sock_b.default_value = (0.14, 0.28, 0.58, 1.0)
         nt.links.new(env.outputs["Color"], sock_a)
         nt.links.new(sock_out, bg.inputs["Color"])
         log("BLENDER", f"Loaded cached Poly Haven HDRI (2 AM night-blue tint): {hdri_path.name}")
     else:
-        bg.inputs["Color"].default_value = (0.02, 0.04, 0.12, 1.0)
+        bg.inputs["Color"].default_value = (0.02, 0.05, 0.14, 1.0)
 
-    bg.inputs["Strength"].default_value = 0.06
+    bg.inputs["Strength"].default_value = 0.08
 
-    def _add_area_light(name: str, loc, rot, size, size_y, energy, color):
+    def _add_area_light(name: str, loc, rot, size, size_y, energy, color, spread_deg: Optional[float] = None):
         ld = bpy.data.lights.new(name=name, type="AREA")
         ld.shape = "RECTANGLE"
         ld.size = size
         ld.size_y = size_y
         ld.energy = energy
         ld.color = color
+        if spread_deg is not None and hasattr(ld, "spread"):
+            ld.spread = math.radians(spread_deg)
         lo = bpy.data.objects.new(name, ld)
         lo.location = loc
         lo.rotation_euler = rot
         scene.collection.objects.link(lo)
         return lo, ld
 
-    # 1. Dim blue 2 AM moonlight/fridge glow (Scene 1 pre-switch 0-1.0s)
+    # 1. Atmospheric 2 AM moonlight/door-gap spill (Scene 1A half-dark blue so Indomie & kitchen are readable!)
     _, night_data = _add_area_light(
         "Light_Night_Blue",
-        (0.95, 0.75, 1.35),
-        (math.radians(52), math.radians(38), 0.0),
-        0.7,
-        1.1,
-        9.0,
-        (0.14, 0.36, 1.0),
+        (1.05, 0.55, 1.48),
+        (math.radians(48), math.radians(36), 0.0),
+        0.95,
+        1.25,
+        24.0,
+        (0.24, 0.48, 1.0),
     )
 
     # 2. Overhead TL Fluorescent Neon behind-above human (y=2.25) so front of human face falls
@@ -268,15 +270,16 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
         (0.92, 0.96, 1.0),
     )
 
-    # 3. Dramatic Boss Backlight behind human head (crisp silhouette rim light)
+    # 3. Dramatic Boss Backlight behind human head (tight spread for razor-sharp rim light on hair/shoulders!)
     rim_obj, rim_data = _add_area_light(
         "Light_Boss_Backlight",
-        (0.0, 2.95, 2.15),
-        (math.radians(-46), 0.0, 0.0),
-        0.80,
-        0.80,
+        (0.0, 2.90, 2.10),
+        (math.radians(-42), 0.0, 0.0),
+        0.70,
+        0.55,
         0.0,
-        (0.84, 0.93, 1.0),
+        (0.84, 0.94, 1.0),
+        spread_deg=72.0,
     )
 
     # 4. Controlled foreground floor pool (keeps Indomie spill, tile floor & sandal vivid
@@ -291,8 +294,7 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
         (0.96, 0.94, 0.88),
     )
 
-    # 5. Subtle warm bounce fill from tile floor onto human face in Scene 8 ONLY
-    #    (just enough to read wide eyes + shock mouth in shadow without ruining dark silhouette!)
+    # 5. Subtle floor bounce fill (kept at 0.0 in Scene 8 so face sits in deepest dramatic shadow!)
     face_fill_obj, face_fill_data = _add_area_light(
         "Light_Face_ShadowRead",
         (0.0, 1.75, 1.25),
@@ -312,6 +314,20 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
     cyan_obj.location = (0.0, 0.62, 0.28)
     scene.collection.objects.link(cyan_obj)
 
+    # 7. Crisp tiny-radius spotlight strictly for Scene 1 cockroach silhouette shadow on ceramic floor/Indomie!
+    roach_spot_data = bpy.data.lights.new(name="Light_Roach_ShadowSpot", type="SPOT")
+    roach_spot_data.energy = 0.0
+    roach_spot_data.color = (0.45, 0.68, 1.0)
+    roach_spot_data.shadow_soft_size = 0.004  # Razor-sharp insect silhouette shadow!
+    roach_spot_data.spot_size = math.radians(52.0)
+    roach_spot_data.spot_blend = 0.35
+    roach_spot_obj = bpy.data.objects.new("Light_Roach_ShadowSpot", roach_spot_data)
+    roach_spot_obj.location = (0.02, -0.11, 0.21)
+    # Aim from (0.02, -0.11, 0.21) directly through shadow caster (0.0, 0.05, 0.018) onto floor/Indomie (0.0, 0.14, 0.0)
+    aim_dir = (Vector((0.0, 0.15, 0.0)) - roach_spot_obj.location).normalized()
+    roach_spot_obj.rotation_euler = aim_dir.to_track_quat("-Z", "Y").to_euler()
+    scene.collection.objects.link(roach_spot_obj)
+
     return {
         "world_bg": bg,
         "night_light": night_data,
@@ -324,6 +340,8 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
         "face_fill_light": face_fill_data,
         "face_fill_obj": face_fill_obj,
         "cyan_light": cyan_data,
+        "roach_spot_light": roach_spot_data,
+        "roach_spot_obj": roach_spot_obj,
     }
 
 
@@ -383,11 +401,79 @@ def import_gltf_prop(
     return anchor
 
 
-def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
-    """Fill the Indonesian kosan kitchen with 15 real Poly Haven CC0 props (kitchen_set.py style).
+def _configure_wall_clock_0200(anchor: bpy.types.Object) -> None:
+    """Set wall_clock hands strictly to 02:00 (hour=+60deg, minute=0deg) and boost dial/hand contrast."""
+    bpy.context.view_layer.update()
+    # Viewed from -Y looking toward +Y: +Z is 12:00, +X is 3:00; +Y rotation moves +Z -> +X clockwise!
+    target_angles_deg = {
+        "hour": 60.0,    # 2 o'clock
+        "minute": 0.0,   # 12 o'clock (exact 02:00!)
+        "second": 180.0, # 6 o'clock (out of the way so 02:00 reads cleanly!)
+    }
 
-    All props stay strictly outside the cockroach's central sprint corridor (x in [-0.36, 0.36])
-    so the camera never collides with furniture while every camera angle looks dense & real!
+    hand_black_mat = props.make_material("Mat_ClockHand_JetBlack", (0.006, 0.006, 0.008, 1.0), roughness=0.22)
+
+    for obj in anchor.children_recursive:
+        if obj.type != "MESH" or not obj.data.vertices:
+            continue
+        lname = obj.name.lower()
+        matched_key = None
+        if "hour" in lname:
+            matched_key = "hour"
+        elif "minute" in lname:
+            matched_key = "minute"
+        elif "second" in lname:
+            matched_key = "second"
+
+        if matched_key is not None:
+            # Find tip vertex furthest from hand pivot in XZ plane
+            best_v = max(obj.data.vertices, key=lambda v: v.co.x * v.co.x + v.co.z * v.co.z)
+            cur_rad = math.atan2(best_v.co.x, best_v.co.z)
+            tgt_rad = math.radians(target_angles_deg[matched_key])
+            delta = tgt_rad - cur_rad
+            obj.rotation_mode = "XYZ"
+            obj.rotation_euler.y += delta
+            # Slightly thicken hour/minute hands in X/Z so 02:00 reads boldly on mobile screens
+            if matched_key in ("hour", "minute"):
+                obj.scale = (1.42, 1.0, 1.08)
+            obj.data.materials.clear()
+            obj.data.materials.append(hand_black_mat)
+        else:
+            # Sharpen clock face dial contrast without washing out under bright overhead neon!
+            for mat in obj.data.materials:
+                if not mat or not mat.use_nodes:
+                    continue
+                bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+                if bsdf is None:
+                    continue
+                # If this is clear glass cover, make it ultra-clean/non-glaring so dial never washes out
+                if "glass" in mat.name.lower() or (
+                    "Transmission Weight" in bsdf.inputs and bsdf.inputs["Transmission Weight"].default_value > 0.4
+                ):
+                    if "Alpha" in bsdf.inputs:
+                        bsdf.inputs["Alpha"].default_value = 0.05
+                    bsdf.inputs["Roughness"].default_value = 0.05
+                    continue
+                # Boost dial contrast while taming brightness so 02:00 black hands pop even under neon!
+                bc_in = bsdf.inputs.get("Base Color")
+                if bc_in and bc_in.is_linked:
+                    src_sock = bc_in.links[0].from_socket
+                    bc_node = mat.node_tree.nodes.new("ShaderNodeBrightContrast")
+                    bc_node.inputs["Bright"].default_value = -0.06
+                    bc_node.inputs["Contrast"].default_value = 0.28
+                    mat.node_tree.links.new(src_sock, bc_node.inputs["Color"])
+                    mat.node_tree.links.new(bc_node.outputs["Color"], bc_in)
+                    if "Roughness" in bsdf.inputs and not bsdf.inputs["Roughness"].is_linked:
+                        bsdf.inputs["Roughness"].default_value = 0.62
+    bpy.context.view_layer.update()
+    log("BLENDER", "Configured Kitchen_WallClock strictly to 02:00 (high-contrast jet-black hands).")
+
+
+def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
+    """Fill the widened Indonesian kosan kitchen & left shelf with 29 Poly Haven CC0 prop instances.
+
+    All props stay strictly outside the cockroach's central sprint corridor (x in [-0.46, 0.46])
+    so the camera never collides with furniture while every angle looks authentically lived-in!
     """
     models_dir = assets_dir / "models_3d"
 
@@ -399,40 +485,65 @@ def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
         return p2
 
     counter_top_z = 0.828
-    shelf_top_z = 1.495
+    wall_shelf_top_z = 1.495
+
+    # Exact plank top Zs of Shelf_01 at scale 0.88 (base planks: [0.14, 0.38, 0.66, 0.94, 1.22, 1.51, 1.79])
+    # NOTE: Shelf_01 local y in [-0.257, 0.0] rotated +90deg around Z spans x in [anchor_x, anchor_x + 0.226]!
+    # With anchor at x=-1.06, shelf planks sit at x in [-1.06, -0.834] -> center sh_x = -0.93!
+    sh_scale = 0.88
+    sh_x = -0.93
+    t1 = 0.14 * sh_scale   # 0.123m
+    t2 = 0.38 * sh_scale   # 0.334m
+    t3 = 0.66 * sh_scale   # 0.581m
+    t4 = 0.94 * sh_scale   # 0.827m
+    t5 = 1.22 * sh_scale   # 1.074m
+    t6 = 1.51 * sh_scale   # 1.329m
+    t7 = 1.79 * sh_scale   # 1.575m
 
     placements = [
         # (asset_id, name, loc, rot_deg, scale, snap_z)
+        # --- FLOOR FURNITURE (widened kitchen x in [-1.32, +1.92]) ---
         # 1. Cardboard box blocking right side near fridge (Scene 6: "kanan buntu/kardus"!)
-        ("cardboard_box_01", "Kardus_DeadEnd_Right", (0.56, 2.48, 0.0), (0.0, 0.0, -18.0), 1.05, 0.0),
+        ("cardboard_box_01", "Kardus_DeadEnd_Right", (0.64, 2.48, 0.0), (0.0, 0.0, -18.0), 1.08, 0.0),
         # 2. Wooden kitchen cabinet along right-back wall
-        ("modern_wooden_cabinet", "Kitchen_Cabinet_Right", (1.28, 2.08, 0.0), (0.0, 0.0, -90.0), 0.92, 0.0),
-        # 3. Left wall shelf
-        ("Shelf_01", "Kitchen_Shelf_Left", (-0.68, 1.15, 0.0), (0.0, 0.0, 90.0), 0.85, 0.0),
+        ("modern_wooden_cabinet", "Kitchen_Cabinet_Right", (1.56, 2.15, 0.0), (0.0, 0.0, -90.0), 0.94, 0.0),
+        # 3. Left wall shelf (packed with 14 props sitting squarely on visible planks!)
+        ("Shelf_01", "Kitchen_Shelf_Left", (-1.06, 1.15, 0.0), (0.0, 0.0, 90.0), sh_scale, 0.0),
         # 4. Kosan wooden chair on left foreground-mid
-        ("WoodenChair_01", "Kitchen_Chair_Left", (-0.64, 0.26, 0.0), (0.0, 0.0, 58.0), 0.92, 0.0),
+        ("WoodenChair_01", "Kitchen_Chair_Left", (-0.94, 0.16, 0.0), (0.0, 0.0, 52.0), 0.92, 0.0),
         # 5. Wicker basket near right cabinet/kardus
-        ("wicker_basket_02", "Kitchen_Basket_Right", (0.64, 1.98, 0.0), (0.0, 0.0, 22.0), 0.95, 0.0),
-        # 6. Electric stove on kosan counter
-        ("electric_stove", "Kitchen_Stove", (1.30, 0.65, counter_top_z), (0.0, 0.0, -90.0), 0.88, counter_top_z),
-        # 7. Enamel cooking pot on counter/stove area
-        ("pot_enamel_01", "Kitchen_Pot_Enamel", (1.26, 0.42, counter_top_z), (0.0, 0.0, 30.0), 0.95, counter_top_z),
-        # 8. Frying pan on counter
-        ("brass_pan_01", "Kitchen_Pan", (1.30, 1.02, counter_top_z), (0.0, 0.0, -145.0), 0.95, counter_top_z),
-        # 9. Wooden cutting board on counter
-        ("wooden_cutting_board", "Kitchen_CuttingBoard", (1.26, 0.12, counter_top_z), (0.0, 0.0, 12.0), 0.95, counter_top_z),
-        # 10. Metal kettle/jug on counter
-        ("metal_jug", "Kitchen_MetalJug", (1.28, -0.14, counter_top_z), (0.0, 0.0, -40.0), 0.95, counter_top_z),
-        # 11. Wooden bowl on floor right of Indomie spill
-        ("wooden_bowl_01", "Kitchen_Bowl_Floor", (0.58, 0.72, 0.0), (0.0, 0.0, 25.0), 0.95, 0.0),
-        # 12. Second bowl on upper floating shelf
-        ("wooden_bowl_02", "Kitchen_Bowl_Shelf", (1.48, 0.28, shelf_top_z), (0.0, 0.0, 15.0), 0.95, shelf_top_z),
-        # 13. Jug/bottle on upper wall shelf
-        ("jug_01", "Kitchen_Jug_Shelf", (1.48, 0.68, shelf_top_z), (0.0, 0.0, -30.0), 0.95, shelf_top_z),
-        # 14. Tea set on upper wall shelf
-        ("tea_set_01", "Kitchen_TeaSet_Shelf", (1.46, 1.06, shelf_top_z), (0.0, 0.0, -85.0), 0.90, shelf_top_z),
-        # 15. Wall clock on back wall above fridge/right side (facing -Y into kitchen!)
-        ("wall_clock", "Kitchen_WallClock", (0.64, 3.51, 1.94), (0.0, 0.0, 0.0), 1.05, None),
+        ("wicker_basket_02", "Kitchen_Basket_Right", (0.84, 1.98, 0.0), (0.0, 0.0, 22.0), 0.98, 0.0),
+        # 6. Wooden bowl on floor right-mid
+        ("wooden_bowl_01", "Kitchen_Bowl_Floor", (0.76, 0.72, 0.0), (0.0, 0.0, 25.0), 0.95, 0.0),
+
+        # --- PACKED LEFT SHELF (14 real Poly Haven CC0 props squarely on tiers 1..7!) ---
+        ("wicker_basket_02", "LeftShelf_Basket_T1", (sh_x, 0.96, t1), (0.0, 0.0, 82.0), 0.48, t1),
+        ("cardboard_box_01", "LeftShelf_Box_T1", (sh_x, 1.36, t1), (0.0, 0.0, 4.0), 0.42, t1),
+        ("pot_enamel_01", "LeftShelf_Pot_T2", (sh_x, 0.94, t2), (0.0, 0.0, 65.0), 0.72, t2),
+        ("wooden_bowl_01", "LeftShelf_Bowl_T2", (sh_x, 1.34, t2), (0.0, 0.0, 18.0), 0.72, t2),
+        ("jug_01", "LeftShelf_Jug_T3", (sh_x, 0.88, t3), (0.0, 0.0, 75.0), 0.72, t3),
+        ("ceramic_vase_01", "LeftShelf_Vase1_T3", (sh_x, 1.18, t3), (0.0, 0.0, 25.0), 0.72, t3),
+        ("food_apple_01", "LeftShelf_Apple_T3", (sh_x, 1.42, t3), (0.0, 0.0, 10.0), 1.05, t3),
+        ("tea_set_01", "LeftShelf_TeaSet_T4", (sh_x, 1.02, t4), (0.0, 0.0, 90.0), 0.68, t4),
+        ("ceramic_vase_02", "LeftShelf_Vase2_T4", (sh_x, 1.40, t4), (0.0, 0.0, -15.0), 0.72, t4),
+        ("metal_jug", "LeftShelf_MetalJug_T5", (sh_x, 0.92, t5), (0.0, 0.0, 110.0), 0.76, t5),
+        ("wooden_bowl_02", "LeftShelf_Bowl2_T5", (sh_x, 1.28, t5), (0.0, 0.0, 35.0), 0.72, t5),
+        ("ceramic_vase_03", "LeftShelf_Vase3_T6", (sh_x, 1.08, t6), (0.0, 0.0, 40.0), 0.72, t6),
+        ("brass_pan_01", "LeftShelf_Pan_T6", (sh_x, 1.38, t6), (0.0, 0.0, 72.0), 0.58, t6),
+        ("pot_enamel_01", "LeftShelf_Pot_T7", (sh_x, 1.14, t7), (0.0, 0.0, -35.0), 0.68, t7),
+
+        # --- RIGHT COUNTER & FLOATING SHELF PROPS ---
+        ("electric_stove", "Kitchen_Stove", (1.58, 0.65, counter_top_z), (0.0, 0.0, -90.0), 0.88, counter_top_z),
+        ("pot_enamel_01", "Kitchen_Pot_Enamel", (1.54, 0.42, counter_top_z), (0.0, 0.0, 30.0), 0.95, counter_top_z),
+        ("brass_pan_01", "Kitchen_Pan", (1.58, 1.02, counter_top_z), (0.0, 0.0, -145.0), 0.95, counter_top_z),
+        ("wooden_cutting_board", "Kitchen_CuttingBoard", (1.54, 0.12, counter_top_z), (0.0, 0.0, 12.0), 0.95, counter_top_z),
+        ("metal_jug", "Kitchen_MetalJug", (1.56, -0.14, counter_top_z), (0.0, 0.0, -40.0), 0.95, counter_top_z),
+        ("wooden_bowl_02", "Kitchen_Bowl_Shelf", (1.76, 0.28, wall_shelf_top_z), (0.0, 0.0, 15.0), 0.95, wall_shelf_top_z),
+        ("jug_01", "Kitchen_Jug_Shelf", (1.76, 0.68, wall_shelf_top_z), (0.0, 0.0, -30.0), 0.95, wall_shelf_top_z),
+        ("tea_set_01", "Kitchen_TeaSet_Shelf", (1.74, 1.06, wall_shelf_top_z), (0.0, 0.0, -85.0), 0.90, wall_shelf_top_z),
+
+        # --- WALL CLOCK STRICTLY AT 02:00 (prominent, clear of character's left hand in 01B!) ---
+        ("wall_clock", "Kitchen_WallClock", (0.88, 3.50, 1.92), (0.0, 0.0, 0.0), 1.44, None),
     ]
 
     placed = 0
@@ -440,7 +551,9 @@ def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
         obj = import_gltf_prop(_gltf(asset_id), name, loc, rot_deg, scale=scale, snap_to_z=snap_z)
         if obj is not None:
             placed += 1
-        elif asset_id == "cardboard_box_01":
+            if name == "Kitchen_WallClock":
+                _configure_wall_clock_0200(obj)
+        elif asset_id == "cardboard_box_01" and name == "Kardus_DeadEnd_Right":
             box_mat = props.make_material("Mat_Cardboard_Fallback", (0.48, 0.35, 0.20, 1.0), roughness=0.88)
             props._make_beveled_box(name, (0.44, 0.40, 0.36), 0.006, box_mat, location=(loc[0], loc[1], 0.18))
             placed += 1
@@ -528,22 +641,31 @@ def _set_antennae_pose(
 # FULL EP001 8-SCENE PER-FRAME CHOREOGRAPHY (REAL MPFB2 + MICRO-POV)
 # =============================================================================
 
+def pick_scene01a_frame(scene_meta: Dict[str, Any], fps: int) -> int:
+    """Pick the Scene 01A hero frame (half-dark 2 AM blue moonlight, ~0.50s before neon flash)."""
+    f0 = int(scene_meta["start_frame"])
+    f1 = int(scene_meta["end_frame"])
+    return max(f0, min(f1, f0 + int(round(0.50 * fps))))
+
+
 def pick_storyboard_frame(scene_meta: Dict[str, Any], fps: int) -> int:
     """Pick the most informative hero beat frame for each scene in storyboard mode."""
     sid = int(scene_meta["scene_id"])
     f0 = int(scene_meta["start_frame"])
     f1 = int(scene_meta["end_frame"])
     span = max(1, f1 - f0)
-    # Tailored hero beat per scene so storyboard_grid.png showcases 8 distinct cinematic shots!
+    if sid == 4:
+        # Exact beat right after sandal slams onto floor beside fleeing camera (0.68s into Scene 4)!
+        return max(f0, min(f1, f0 + int(round(0.68 * fps))))
+    # Tailored hero beat per scene so storyboard_sheet.png showcases 9 distinct cinematic shots!
     frac_map = {
-        1: 0.55,  # Post neon flash: glossy Indomie spill + towering human + raised sandal
-        2: 0.65,  # Boss Terakhir: low-angle backlit silhouette + broad green Swallow sandal
-        3: 0.55,  # Cheat Code Aktif: bullet-time descending sandal + subtle cyan wind ribbons
-        4: 0.42,  # 300 KM/JAM: post-slam hyper-sprint down tile floor toward fridge
-        5: 0.72,  # Tinggal Sejengkal: fridge 5.5cm gap dead ahead + giant foot descending!
-        6: 0.88,  # Terkepung: dramatic whip-pan UP at towering giant + sandal about to drop!
+        1: 0.55,  # 01B Post neon flash: Indomie spill + roach shadow + barefoot human glaring + 02:00 clock
+        2: 0.65,  # Boss Terakhir: predatory lean + fierce glare + broad green Swallow sole aimed down
+        3: 0.55,  # Cheat Code Aktif: bullet-time descending flat sandal + subtle cyan wind ribbons
+        5: 0.72,  # Tinggal Sejengkal: fridge 5.5cm gap dead ahead + barefoot giant foot descending!
+        6: 0.88,  # Terkepung: undistorted wide frame showing barefoot blocking foot below + raised sandal above!
         7: 0.72,  # Mode Terbang: amber veined wings at bottom corners + ascent toward dark face
-        8: 0.72,  # Maaf Ya Bang: panicked dark-shadowed MPFB2 face close-up + falling sandal
+        8: 0.72,  # Maaf Ya Bang: dramatic dark-shadowed MPFB2 face + sharp rim light + falling sandal
     }
     frac = frac_map.get(sid, 0.50)
     return max(f0, min(f1, f0 + int(round(frac * span))))
@@ -567,19 +689,20 @@ def build_ep001_animation(
     # Use CONSTANT interpolation when baking per-frame (exact Zack kitchen_shots.py rule)
     bpy.context.preferences.edit.keyframe_new_interpolation_type = "CONSTANT" if bake_frames is None else "LINEAR"
 
-    # 1. Build kitchen room, lighting & 15 Poly Haven CC0 props
+    # 1. Build widened kitchen room, lighting & 27 Poly Haven CC0 props (+ 02:00 wall clock)
     env = props.build_kitchen_tile_floor(assets_dir)
     lights = setup_world_and_lights(scene, assets_dir)
     populate_dense_kosan_kitchen(assets_dir)
 
-    # 2. Build stylized Indonesian props
+    # 2. Build stylized Indonesian props + Scene 1 cockroach silhouette shadow caster
     props.build_indomie_bowl_spill((0.0, 0.22, 0.0))
     props.build_fridge_under_gap((-0.14, 2.95, 0.0))
     sandal = props.build_sandal_jepit_swallow((0.0, 0.0, 0.0))
     wind = props.build_wind_lines((0.0, 0.65, 0.18))
-    dust = props.build_dust_puff((0.0, 0.45, 0.01))
+    dust = props.build_dust_puff((0.14, 0.58, 0.015))
+    shadow_roach = props.build_cockroach_shadow_caster((0.0, 0.055, 0.018))
 
-    # 3. Setup Micro-POV Camera (1.5cm height, Macro DOF, Antennae + Translucent Veined Wings)
+    # 3. Setup Micro-POV Camera (1.5cm height, Macro DOF, Antennae + Front Leg Tips + Veined Wings)
     cam_data = bpy.data.cameras.new("MicroPOV_Camera")
     cam_data.clip_start = 0.005  # Essential for 1.5cm macro cockroach POV!
     cam_data.clip_end = 40.0
@@ -621,7 +744,7 @@ def build_ep001_animation(
         return last_sid, s, 1.0, float(s["scene_duration_sec"])
 
     frames_to_bake = sorted(set(bake_frames)) if bake_frames is not None else list(range(1, total_frames + 1))
-    log("BAKE", f"Baking {len(frames_to_bake)} frames (MPFB2 rig + wrist-anchored sandal + Macro DOF)...")
+    log("BAKE", f"Baking {len(frames_to_bake)} frames (MPFB2 barefoot + wrist-anchored sandal + Macro DOF)...")
     t_bake = _time.monotonic()
 
     # Keep track of Scene 8 sandal drop start state
@@ -642,31 +765,39 @@ def build_ep001_animation(
         show_speed = False
         show_wings = False
         show_black = False
+        show_shadow_roach = False
+        show_front_legs = sid in (1, 4, 5)
 
         # Default lighting ("Jam 2 Pagi" backlit neon strictly behind human plane)
         e_night = 0.8
-        e_neon = 115.0
+        e_neon = 118.0
         neon_y = 2.15
         e_rim = 210.0
+        rim_loc = (0.0, 2.90, 2.10)
+        rim_rot = (-42.0, 0.0, 0.0)
         e_fg = 10.0
         e_face_fill = 0.0
         e_cyan = 0.0
+        e_roach_spot = 0.0
+        roach_spot_col = (0.45, 0.68, 1.0)
         e_neon_emit = 14.0
         w_strength = 0.07
 
-        # Default human state
+        # Default human state (natural athletic barefoot kosan hunter stance, NEVER stiff wide A-pose!)
         h_loc = (0.02, 1.38, 0.0)
         h_yaw = 0.0
-        h_hip_drop = 0.0
+        h_hip_drop = 0.04
+        h_stance_scale = 0.72
+        h_stagger_y = 0.07
         l_foot_ov = None
         expr1, expr2, expr_k, jaw_ex = "glare", None, 0.0, 0.0
         grip_sandal = True
         right_hand_target = Vector((-0.24, 1.15, 1.25))
         left_hand_target: Optional[Vector] = None
-        torso_lean = 6.0
-        head_yaw, head_pitch = 0.0, 14.0
-        sandal_extra_pitch = 0.0
-        sandal_extra_roll = 0.0
+        torso_lean = 12.0
+        head_yaw, head_pitch = 0.0, 18.0
+        sandal_aim_sole: Optional[Vector] = Vector((0.06, -0.78, -0.62))
+        sandal_blade_hint: Optional[Vector] = Vector((-0.20, -0.10, 1.0))
 
         # Default camera
         cam_loc = (0.0, 0.0, cam_h)
@@ -680,176 +811,222 @@ def build_ep001_animation(
         wing_flap = 0.0
 
         # =====================================================================
-        # SCENE 1: JAM 2 PAGI — Dark blue -> neon flash @1.05s -> startled tilt
+        # SCENE 1: JAM 2 PAGI — 01A Half-dark blue + roach shadow -> 01B Neon flash!
         # =====================================================================
         if sid == 1:
             t_flash = 1.05
+            show_shadow_roach = True
             if local_sec < t_flash:
-                e_night = 9.5
+                # 01A: Moody half-dark 2 AM blue moonlight (NOT pitch black! Indomie, roach shadow & kitchen readable!)
+                e_night = 24.0
                 e_neon = 0.0
-                e_rim = 0.0
+                e_rim = 14.0  # Faint doorway cool rim on lurking human silhouette
                 e_fg = 0.0
-                e_neon_emit = 0.04
-                w_strength = 0.05
-                cam_loc = (0.0, -0.02 + 0.02 * (local_sec / t_flash), cam_h)
-                cam_rot = (82.0, 0.0, 0.0)
-                cam_fov = base_fov
+                e_roach_spot = 3.6
+                roach_spot_col = (0.48, 0.72, 1.0)
+                e_neon_emit = 0.06
+                w_strength = 0.12
+                cam_loc = (0.0, -0.03 + 0.02 * (local_sec / t_flash), cam_h + 0.002)
+                cam_rot = (80.0, 0.0, 0.0)  # Tilted slightly down to clearly show Indomie spill + cockroach shadow!
+                cam_fov = 96.0
                 dof_dist = 0.22
-                dof_fstop = 2.8
-                ant_pitch, ant_spread, ant_jit = -8.0, 6.0, 3.5
-                right_hand_target = Vector((-0.24, 1.18, 1.02))
-                torso_lean = 4.0
-                head_pitch = 16.0
+                dof_fstop = 3.6
+                ant_pitch, ant_spread, ant_jit = -6.0, 8.0, 3.0
+                h_loc = (0.02, 1.44, 0.0)
+                h_hip_drop = 0.05
+                torso_lean = 12.0
+                head_pitch = 22.0
+                expr1 = "glare"
+                right_hand_target = Vector((-0.24, 1.22, 1.05))
+                sandal_aim_sole = Vector((0.05, -0.82, -0.57))
+                sandal_blade_hint = Vector((-0.18, -0.15, -1.0))
             else:
+                # 01B: Sudden bright overhead neon flash! Camera jolts up, human leaning forward glaring!
                 dt = local_sec - t_flash
                 flash_boost = max(0.0, 1.0 - dt / 0.35)
                 e_night = 0.8
-                e_neon = 118.0 + 70.0 * flash_boost
-                e_rim = 220.0
+                e_neon = 124.0 + 68.0 * flash_boost
+                e_rim = 225.0
                 e_fg = 12.0
+                e_roach_spot = 5.5  # Keeps crisp cockroach silhouette shadow visible on ceramic floor!
+                roach_spot_col = (0.94, 0.96, 1.0)
                 e_neon_emit = 15.0 + 6.0 * flash_boost
-                w_strength = 0.07
+                w_strength = 0.08
                 jolt = _smooth(min(1.0, dt / 0.22))
-                cam_loc = (0.0, -0.01, cam_h + 0.006 * jolt)
-                cam_rot = (_lerp(83.0, 102.0, jolt), 2.5 * math.sin(jolt * math.pi), -1.5 * math.sin(jolt * math.pi))
+                cam_loc = (0.0, -0.02, cam_h + 0.006 * jolt)
+                cam_rot = (_lerp(81.0, 100.0, jolt), 2.2 * math.sin(jolt * math.pi), -1.5 * math.sin(jolt * math.pi))
                 cam_fov = base_fov
-                dof_dist = _lerp(0.24, 1.15, jolt)
-                dof_fstop = 3.2
-                ant_pitch, ant_spread, ant_jit = 24.0, -6.0, 1.5
+                dof_dist = _lerp(0.24, 1.12, jolt)
+                dof_fstop = 3.6
+                ant_pitch, ant_spread, ant_jit = 20.0, 10.0, 1.5
                 lift_u = _smooth(min(1.0, dt / max(0.5, s_meta["scene_duration_sec"] - t_flash)))
-                right_hand_target = Vector((-0.26, _lerp(1.16, 1.08, lift_u), _lerp(1.06, 1.62, lift_u)))
-                torso_lean = _lerp(5.0, 10.0, lift_u)
-                head_pitch = 20.0
-                expr1, expr2, expr_k = "neutral", "glare", lift_u
+                h_loc = (0.02, 1.38, 0.0)
+                h_hip_drop = _lerp(0.05, 0.09, lift_u)
+                torso_lean = _lerp(12.0, 19.0, lift_u)
+                head_pitch = 24.0
+                expr1, expr2, expr_k = "glare", "angry", lift_u
+                right_hand_target = Vector((-0.26, _lerp(1.16, 1.06, lift_u), _lerp(1.08, 1.58, lift_u)))
+                sandal_aim_sole = Vector((0.08, -0.80, -0.59))
+                sandal_blade_hint = Vector((-0.22, -0.08, 1.0))
 
         # =====================================================================
-        # SCENE 2: BOSS TERAKHIR — Low-angle silhouette + raised Swallow sandal
+        # SCENE 2: BOSS TERAKHIR — Predatory crouch + fierce glare + flat green Swallow sole!
         # =====================================================================
         elif sid == 2:
-            e_neon = 110.0
-            e_rim = 280.0
-            e_fg = 8.0
+            e_neon = 114.0
+            e_rim = 275.0
+            e_fg = 9.0
             w_strength = 0.06
             h_loc = (0.02, 1.38, 0.0)
-            torso_lean = 12.0
-            head_pitch = 22.0
-            expr1 = "glare"
-            # Right arm lifts Swallow flip-flop high overhead with broad sole turned toward camera!
-            right_hand_target = Vector((-0.30, 1.12, _lerp(1.66, 1.88, _smooth(u))))
-            sandal_extra_pitch = 20.0
-            sandal_extra_roll = 68.0
+            h_hip_drop = 0.11
+            h_stance_scale = 0.70
+            h_stagger_y = 0.09
+            torso_lean = 22.0
+            head_pitch = 25.0
+            expr1 = "angry"
+            # Right arm lifts Swallow flip-flop high overhead with FLAT green striking sole aimed straight at camera!
+            right_hand_target = Vector((-0.28, 1.06, _lerp(1.60, 1.78, _smooth(u))))
+            sandal_aim_sole = Vector((0.10, -0.74, -0.66))
+            sandal_blade_hint = Vector((-0.22, -0.10, 1.0))
 
             # Staggered dramatic push-in (low angle!)
             step_u = _smooth(min(1.0, u * 1.15))
-            cam_loc = (_lerp(0.0, -0.02, step_u), _lerp(0.10, 0.18, step_u), cam_h)
-            cam_rot = (_lerp(122.0, 136.0, step_u), 2.2 * math.sin(u * math.pi * 2.0), _lerp(5.0, 10.0, step_u))
-            cam_fov = _lerp(88.0, 56.0, step_u)
-            dof_dist = 1.48
-            dof_fstop = 3.2
-            ant_pitch, ant_spread, ant_jit = 22.0, -4.0, 5.0
+            cam_loc = (_lerp(0.0, -0.02, step_u), _lerp(0.06, 0.12, step_u), cam_h + 0.003)
+            cam_rot = (_lerp(118.0, 130.0, step_u), 2.0 * math.sin(u * math.pi * 2.0), _lerp(4.0, 7.0, step_u))
+            cam_fov = _lerp(88.0, 64.0, step_u)
+            dof_dist = 1.38
+            dof_fstop = 3.4
+            ant_pitch, ant_spread, ant_jit = 20.0, 8.0, 5.0
 
         # =====================================================================
-        # SCENE 3: CHEAT CODE AKTIF — Bullet-time slow-mo + subtle cyan wind
+        # SCENE 3: CHEAT CODE AKTIF — Bullet-time slow-mo + flat sandal descending + cyan wind
         # =====================================================================
         elif sid == 3:
-            e_neon = 100.0
-            e_rim = 165.0
-            e_fg = 8.0
-            e_cyan = _lerp(12.0, 32.0, _smooth(u))
+            e_neon = 104.0
+            e_rim = 175.0
+            e_fg = 9.0
+            e_cyan = _lerp(14.0, 34.0, _smooth(u))
             w_strength = 0.06
             show_wind = True
 
-            h_loc = (0.02, 1.32, 0.0)
-            h_hip_drop = _lerp(0.02, 0.10, _smooth(u))
-            torso_lean = _lerp(14.0, 26.0, _smooth(u))
-            head_pitch = 24.0
-            expr1 = "angry"
-            # Slow-motion downward swing of right arm WITH sandal locked in wrist.R!
             su = _smooth(u)
+            h_loc = (0.02, 1.30, 0.0)
+            h_hip_drop = _lerp(0.10, 0.18, su)
+            h_stance_scale = 0.72
+            h_stagger_y = 0.10
+            torso_lean = _lerp(20.0, 32.0, su)
+            head_pitch = 26.0
+            expr1 = "angry"
+            # Slow-motion downward swat WITH flat green sole clearly visible inside frame!
             right_hand_target = Vector((
-                _lerp(-0.28, -0.08, su),
-                _lerp(1.08, 0.66, su),
-                _lerp(1.76, 0.62, su),
+                _lerp(-0.26, -0.06, su),
+                _lerp(1.02, 0.64, su),
+                _lerp(1.56, 0.52, su),
             ))
-            sandal_extra_pitch = _lerp(20.0, 55.0, su)
+            sandal_aim_sole = Vector((0.04, _lerp(-0.62, -0.35, su), _lerp(-0.78, -0.94, su))).normalized()
+            sandal_blade_hint = Vector((-0.12, -0.82, 0.55))
 
-            cam_loc = (_lerp(0.0, 0.03, u), _lerp(0.18, 0.22, u), cam_h)
-            cam_rot = (_lerp(120.0, 114.0, u), _lerp(9.0, 13.0, u), _lerp(5.0, 2.0, u))
-            cam_fov = _lerp(82.0, 94.0, u)
-            dof_dist = _lerp(0.95, 0.58, u)
-            dof_fstop = 2.8
-            ant_pitch, ant_spread, ant_jit = 14.0, 10.0, 8.0
+            # Stay cleanly behind Indomie spill (y=0.05..0.08) so bottom frame has zero blurred noodle smear!
+            cam_loc = (_lerp(0.0, 0.02, u), _lerp(0.04, 0.08, u), cam_h + 0.004)
+            cam_rot = (_lerp(116.0, 114.0, u), _lerp(7.0, 11.0, u), _lerp(3.0, 1.5, u))
+            cam_fov = _lerp(84.0, 92.0, u)
+            dof_dist = _lerp(0.95, 0.62, u)
+            dof_fstop = 3.2
+            ant_pitch, ant_spread, ant_jit = 12.0, 14.0, 8.0
 
             _kf_loc_rot(
                 wind["root"],
                 fr,
-                loc=(_lerp(-0.08, -0.02, u), _lerp(0.76, 0.38, u), _lerp(0.58, 0.16, u)),
+                loc=(_lerp(-0.08, -0.02, u), _lerp(0.76, 0.42, u), _lerp(0.56, 0.20, u)),
                 rot_deg=(_lerp(22.0, 12.0, u), 0.0, _lerp(6.0, 2.0, u)),
                 scale=(_lerp(0.65, 1.05, u), _lerp(0.65, 1.18, u), _lerp(0.65, 1.05, u)),
             )
 
         # =====================================================================
-        # SCENE 4: 300 KM/JAM — Sandal slams floor (still gripped!) + hyper-sprint
+        # SCENE 4: 300 KM/JAM — Sandal SLAMS floor beside camera + low dust + tilted sprint!
         # =====================================================================
         elif sid == 4:
             e_neon = 122.0
             e_rim = 145.0
-            e_fg = 14.0
+            e_fg = 16.0
             w_strength = 0.08
-            t_slam = 0.42
+            t_slam = 0.50
+            t_hold_impact = 1.05  # Hold slammed sandal + dust beside fleeing camera during impact burst!
 
             if local_sec <= t_slam:
                 su = _smooth(local_sec / max(0.05, t_slam))
-                h_loc = (0.02, 1.08, 0.0)
-                h_hip_drop = _lerp(0.12, 0.28, su)
-                torso_lean = _lerp(28.0, 42.0, su)
-                right_hand_target = Vector((_lerp(-0.06, -0.02, su), _lerp(0.62, 0.42, su), _lerp(0.52, 0.12, su)))
-                sandal_extra_pitch = 72.0
-                cam_loc = (-0.02, _lerp(0.24, 0.46, su), cam_h)
-                cam_rot = (92.0, 1.5 * math.sin(fr * 1.5), 0.0)
-                cam_fov = 98.0
-                dof_dist = 0.75
+                h_loc = (_lerp(0.06, 0.28, su), _lerp(1.22, 1.12, su), 0.0)
+                h_yaw = _lerp(0.0, -24.0, su)
+                h_hip_drop = _lerp(0.16, 0.28, su)
+                torso_lean = _lerp(30.0, 44.0, su)
+                right_hand_target = Vector((_lerp(-0.02, 0.12, su), _lerp(0.70, 0.72, su), _lerp(0.48, 0.06, su)))
+                sandal_aim_sole = Vector((0.0, -0.15, -0.99)).normalized()
+                sandal_blade_hint = Vector((-0.38, -0.92, 0.05))
+                cam_loc = (_lerp(-0.04, -0.16, su), _lerp(0.24, 0.34, su), cam_h + 0.004)
+                cam_rot = (91.0, _lerp(-2.0, -10.5, su), _lerp(0.0, -7.0, su))
+                cam_fov = _lerp(96.0, 108.0, su)
+                dof_dist = 0.52
+            elif local_sec <= t_hold_impact:
+                # IMPACT BEAT (Hero Storyboard Frame @ 0.68s!):
+                # Human lunges deep down so the green Swallow sandal ACTUALLY SLAMS FLAT onto the
+                # ceramic tile right beside the fleeing cockroach camera with airy low dust puffs!
+                dt_imp = local_sec - t_slam
+                du = min(1.0, dt_imp / 0.35)
+                show_dust = True
+                show_speed = True
+                _kf_loc_rot(
+                    dust["root"],
+                    fr,
+                    loc=(0.06, 0.72, 0.012 + 0.006 * du),
+                    scale=(_lerp(0.60, 1.40, du), _lerp(0.60, 1.40, du), _lerp(0.55, 1.05, du)),
+                )
+                h_loc = (0.30, 1.06, 0.0)
+                h_yaw = -28.0
+                h_hip_drop = 0.56  # Deep lunge crouch so arm reaches ALL the way down to the floor!
+                torso_lean = 58.0
+                right_hand_target = Vector((0.12, 0.78, 0.055))
+                sandal_aim_sole = Vector((0.0, 0.0, -1.0))  # Flat green rubber sole slammed straight onto tile floor!
+                sandal_blade_hint = Vector((-0.46, -0.89, 0.0))  # Toe & green V-strap extend right into right foreground!
+
+                dash_u = dt_imp / max(0.05, t_hold_impact - t_slam)
+                cam_loc = (-0.18, _lerp(0.32, 0.52, dash_u), cam_h + 0.006)
+                cam_rot = (90.5, -11.0 + 1.4 * math.sin(fr * 1.8), -9.5)
+                cam_fov = 106.0
+                dof_dist = 0.44
             else:
-                dt = local_sec - t_slam
-                sprint_u = min(1.0, dt / max(0.2, s_meta["scene_duration_sec"] - t_slam))
-                # Dust burst right after slam
-                if dt < 0.75:
-                    show_dust = True
-                    du = min(1.0, dt / 0.50)
-                    _kf_loc_rot(
-                        dust["root"],
-                        fr,
-                        loc=(0.0, 0.38, 0.015 + 0.01 * du),
-                        scale=(_lerp(0.3, 2.1, du), _lerp(0.3, 2.1, du), _lerp(0.3, 1.3, du)),
-                    )
+                dt = local_sec - t_hold_impact
+                sprint_u = min(1.0, dt / max(0.2, s_meta["scene_duration_sec"] - t_hold_impact))
                 show_speed = True
                 # Human recovers & starts turning to chase cockroach toward fridge
                 rec_u = _smooth(min(1.0, sprint_u * 1.3))
-                h_loc = (_lerp(0.02, 0.14, rec_u), _lerp(1.08, 1.85, rec_u), 0.0)
-                h_yaw = _lerp(0.0, 155.0, rec_u)
-                h_hip_drop = _lerp(0.26, 0.02, rec_u)
-                torso_lean = _lerp(36.0, 10.0, rec_u)
-                fwd_h, left_h = Vector((math.sin(math.radians(h_yaw)), -math.cos(math.radians(h_yaw)), 0.0)), Vector((math.cos(math.radians(h_yaw)), math.sin(math.radians(h_yaw)), 0.0))
+                h_loc = (_lerp(0.30, 0.14, rec_u), _lerp(1.06, 1.85, rec_u), 0.0)
+                h_yaw = _lerp(-28.0, 155.0, rec_u)
+                h_hip_drop = _lerp(0.50, 0.04, rec_u)
+                torso_lean = _lerp(48.0, 12.0, rec_u)
+                fwd_h = Vector((math.sin(math.radians(h_yaw)), -math.cos(math.radians(h_yaw)), 0.0))
+                left_h = Vector((math.cos(math.radians(h_yaw)), math.sin(math.radians(h_yaw)), 0.0))
                 right_hand_target = Vector(h_loc) + fwd_h * 0.32 - left_h * 0.24 + Vector((0.0, 0.0, _lerp(0.25, 1.25, rec_u)))
+                sandal_aim_sole = (fwd_h * 0.65 + Vector((0.0, 0.0, -0.76))).normalized()
+                sandal_blade_hint = Vector((0.0, 0.0, 1.0))
 
-                cx = -0.18 * math.sin(min(1.0, sprint_u * 1.4) * math.pi * 0.5) + 0.010 * math.sin(fr * 1.6)
-                cy = _lerp(0.48, 1.86, sprint_u)
+                cx = -0.16 + 0.03 * sprint_u + 0.010 * math.sin(fr * 1.6)
+                cy = _lerp(0.56, 1.86, sprint_u)
                 cz = cam_h + 0.0028 * abs(math.sin(fr * 1.8))
                 cam_loc = (cx, cy, cz)
-                cam_rot = (91.5 + 1.2 * math.sin(fr * 2.1), 2.4 * math.sin(fr * 1.5), 1.8 * math.cos(fr * 1.3))
-                cam_fov = _lerp(100.0, 112.0, min(1.0, sprint_u * 3.0))
-                dof_dist = 0.90
+                cam_rot = (91.0 + 1.2 * math.sin(fr * 2.1), -6.0 * (1.0 - sprint_u) + 2.4 * math.sin(fr * 1.5), 1.8 * math.cos(fr * 1.3))
+                cam_fov = _lerp(108.0, 112.0, min(1.0, sprint_u * 3.0))
+                dof_dist = 0.85
             dof_fstop = 4.0
             expr1 = "angry"
-            ant_pitch, ant_spread, ant_jit = -14.0, 20.0, 10.5
+            ant_pitch, ant_spread, ant_jit = -10.0, 18.0, 10.5
 
         # =====================================================================
-        # SCENE 5: TINGGAL SEJENGKAL — Sprint to fridge gap -> GIANT FOOT STOMPS!
+        # SCENE 5: TINGGAL SEJENGKAL — Sprint to fridge gap -> GIANT BARE FOOT STOMPS!
         # =====================================================================
         elif sid == 5:
-            e_neon = 112.0
-            e_rim = 145.0
-            e_fg = 10.0
+            e_neon = 114.0
+            e_rim = 148.0
+            e_fg = 11.0
             w_strength = 0.07
             dur5 = float(s_meta["scene_duration_sec"])
             t_stomp_start = max(1.0, dur5 - 1.05)
@@ -858,11 +1035,13 @@ def build_ep001_animation(
             show_speed = local_sec < t_stomp_land
             h_loc = (0.14, 2.46, 0.0)
             h_yaw = 22.0
-            torso_lean = 14.0
+            torso_lean = 16.0
             expr1 = "angry"
             right_hand_target = Vector((-0.18, 2.18, 1.52))
+            sandal_aim_sole = Vector((0.05, -0.45, -0.89)).normalized()
+            sandal_blade_hint = Vector((-0.15, -0.20, 1.0))
 
-            # Left leg IK lifts high & stomps straight down in front of fridge under-gap!
+            # Left leg IK lifts high & bare foot stomps straight down in front of fridge under-gap!
             if local_sec < t_stomp_start:
                 l_foot_ov = (0.04, 2.60, 0.42, -16.0)
             elif local_sec < t_stomp_land:
@@ -872,98 +1051,104 @@ def build_ep001_animation(
                 l_foot_ov = (-0.09, 2.42, 0.0, 0.0)
                 e_neon = 94.0  # Shadow falls across floor
 
-            cy = _lerp(1.86, 2.16, min(1.0, u * 1.05))
+            cy = _lerp(1.86, 2.08, min(1.0, u * 1.05))
             cx = -0.12 + 0.007 * math.sin(fr * 1.7)
             cz = cam_h + 0.0022 * abs(math.sin(fr * 2.0))
-            pitch_up = 89.0 + (7.0 * _smooth((local_sec - t_stomp_start) / max(0.1, dur5 - t_stomp_start)))
+            pitch_up = 89.0 + (6.0 * _smooth((local_sec - t_stomp_start) / max(0.1, dur5 - t_stomp_start)))
             roll_s = 1.6 * math.sin(fr * 1.6) if local_sec < t_stomp_land else 0.4
             cam_loc = (cx, cy, cz)
             cam_rot = (pitch_up, roll_s, 0.0)
-            cam_fov = _lerp(106.0, 96.0, u)
-            dof_dist = _lerp(0.90, 0.48, u)
+            cam_fov = _lerp(102.0, 88.0, u)
+            dof_dist = _lerp(0.90, 0.52, u)
             dof_fstop = 3.6
-            ant_pitch = -8.0 if local_sec < t_stomp_land else 22.0
+            ant_pitch = -8.0 if local_sec < t_stomp_land else 20.0
             ant_spread, ant_jit = 14.0, 8.5
 
         # =====================================================================
-        # SCENE 6: TERKEPUNG! — Hard brake + Whip-pan Left, Right, Up (sandal!)
+        # SCENE 6: TERKEPUNG! — Pulled back (~50cm) & balanced FOV (82°) = ZERO distortion + FULL sandal!
         # =====================================================================
         elif sid == 6:
             e_neon = 118.0
             neon_y = 2.75
-            e_rim = 180.0
-            e_fg = 8.0
+            e_rim = 190.0
+            e_fg = 10.0
             w_strength = 0.07
-            h_loc = (0.14, 2.46, 0.0)
-            h_yaw = 20.0
-            l_foot_ov = (-0.09, 2.42, 0.0, 0.0)
-            torso_lean = 16.0
-            head_pitch = 22.0
+            h_loc = (0.14, 2.48, 0.0)
+            h_yaw = 18.0
+            h_hip_drop = 0.08
+            l_foot_ov = (-0.08, 2.40, 0.0, 0.0)
+            torso_lean = 20.0
+            head_pitch = 24.0
             expr1 = "angry"
-            # Right arm holds sandal overhead ready to smash down!
-            right_hand_target = Vector((-0.16, 2.14, _lerp(1.68, 1.38, _smooth(max(0.0, (u - 0.65) / 0.35)))))
-            sandal_extra_pitch = 35.0
-            sandal_extra_roll = 45.0
+            # Right arm holds flat green Swallow sandal poised clearly INSIDE upper frame ready to smash!
+            right_hand_target = Vector((-0.20, 2.06, _lerp(1.52, 1.32, _smooth(max(0.0, (u - 0.65) / 0.35)))))
+            sandal_aim_sole = Vector((0.06, -0.52, -0.85)).normalized()
+            sandal_blade_hint = Vector((-0.18, -0.22, 1.0))
 
-            # Multi-beat whip-pan camera choreography
+            # Multi-beat whip-pan camera choreography (pulled back to y=1.48 & FOV=82° -> shows barefoot bottom + sandal top!)
             if u < 0.18:
                 bu = _smooth(u / 0.18)
-                cam_loc = (-0.12, _lerp(2.16, 2.06, bu), cam_h + 0.003 * bu)
-                cam_rot = (_lerp(95.0, 100.0, bu), -3.0 * bu, 0.0)
-                dof_dist = 0.44
-                cam_fov = 100.0
+                cam_loc = (-0.10, _lerp(2.04, 1.62, bu), cam_h + 0.004 * bu)
+                cam_rot = (_lerp(95.0, 102.0, bu), -2.5 * bu, 0.0)
+                dof_dist = 0.72
+                cam_fov = _lerp(88.0, 80.0, bu)
             elif u < 0.44:
                 lu = _smooth(min(1.0, (u - 0.18) / 0.14))
-                cam_loc = (-0.12, 2.06, cam_h)
-                cam_rot = (93.0, 4.0 * lu, _lerp(0.0, 78.0, lu))
-                dof_dist = 0.72
-                cam_fov = 98.0
+                cam_loc = (-0.10, 1.62, cam_h + 0.004)
+                cam_rot = (93.0, 3.5 * lu, _lerp(0.0, 72.0, lu))
+                dof_dist = 0.85
+                cam_fov = 80.0
             elif u < 0.70:
                 ru = _smooth(min(1.0, (u - 0.44) / 0.14))
-                cam_loc = (-0.12, 2.06, cam_h)
-                cam_rot = (93.0, -4.0 * ru, _lerp(78.0, -72.0, ru))
-                dof_dist = 0.72
-                cam_fov = 98.0
+                cam_loc = (-0.10, 1.62, cam_h + 0.004)
+                cam_rot = (93.0, -3.5 * ru, _lerp(72.0, -68.0, ru))
+                dof_dist = 0.85
+                cam_fov = 80.0
             else:
                 uu = _smooth(min(1.0, (u - 0.70) / 0.16))
-                cam_loc = (-0.12, 2.06, cam_h)
-                cam_rot = (_lerp(93.0, 152.0, uu), 3.0 * math.sin(uu * math.pi), _lerp(-72.0, -8.0, uu))
-                dof_dist = 1.05
-                cam_fov = _lerp(98.0, 104.0, uu)
-            dof_fstop = 3.6
-            ant_pitch, ant_spread, ant_jit = 26.0, 18.0, 13.0
+                cam_loc = (-0.08, _lerp(1.62, 1.48, uu), cam_h + 0.005)
+                cam_rot = (_lerp(93.0, 128.0, uu), 2.0 * math.sin(uu * math.pi), _lerp(-68.0, -4.0, uu))
+                dof_dist = 1.18
+                cam_fov = _lerp(80.0, 82.0, uu)
+            dof_fstop = 4.0
+            ant_pitch, ant_spread, ant_jit = 22.0, 16.0, 12.0
 
         # =====================================================================
         # SCENE 7: MODE TERBANG — Translucent veined amber wings + wobbly takeoff
         # =====================================================================
         elif sid == 7:
-            # Neon strictly BEHIND human (y=2.88 > 2.48) so his face falls in dramatic shadow!
-            e_neon = 115.0
-            neon_y = 2.88
-            e_rim = 145.0
+            # Neon strictly BEHIND human (y=2.92 > 2.48) so his face falls in dramatic shadow!
+            e_neon = 120.0
+            neon_y = 2.92
+            e_rim = 165.0
+            rim_loc = (0.0, 2.82, 2.15)
+            rim_rot = (-28.0, 0.0, 0.0)
             e_fg = 0.0
-            e_face_fill = 0.4
-            w_strength = 0.06
+            e_face_fill = 0.0
+            w_strength = 0.045
             t_wings = 1.35
 
             h_loc = (0.02, 2.48, 0.0)
             h_yaw = 0.0
-            torso_lean = 8.0
+            h_hip_drop = 0.06
+            torso_lean = 10.0
             head_pitch = _lerp(18.0, 2.0, _smooth(u))
             expr1, expr2, expr_k = "angry", "shock", _smooth(max(0.0, (u - 0.40) / 0.60))
-            right_hand_target = Vector((-0.26, 2.18, _lerp(1.48, 1.32, _smooth(u))))
+            right_hand_target = Vector((-0.26, 2.16, _lerp(1.48, 1.34, _smooth(u))))
+            sandal_aim_sole = Vector((0.12, -0.76, -0.64)).normalized()
+            sandal_blade_hint = Vector((-0.20, 0.0, 1.0))
 
             if local_sec < t_wings:
                 u0 = _smooth(local_sec / max(0.1, t_wings))
-                cam_loc = (_lerp(-0.12, -0.05, u0), _lerp(2.04, 1.72, u0), cam_h + 0.015 * u0)
-                cam_rot = (_lerp(132.0, 114.0, u0), 3.5 * math.sin(fr * 1.4), 0.0)
-                cam_fov = _lerp(98.0, 104.0, u0)
+                cam_loc = (_lerp(-0.08, -0.05, u0), _lerp(1.52, 1.48, u0), cam_h + 0.015 * u0)
+                cam_rot = (_lerp(128.0, 114.0, u0), 3.5 * math.sin(fr * 1.4), 0.0)
+                cam_fov = _lerp(82.0, 96.0, u0)
                 dof_dist = 1.05
             else:
                 show_wings = True
                 uf = (local_sec - t_wings) / max(0.1, float(s_meta["scene_duration_sec"]) - t_wings)
                 cx = -0.05 + 0.22 * math.sin(uf * math.pi * 2.5)
-                cy = _lerp(1.72, 1.28, uf)
+                cy = _lerp(1.48, 1.28, uf)
                 cz = _lerp(0.04, 1.46, uf ** 1.12)
                 cam_loc = (cx, cy, cz)
                 cam_rot = (
@@ -971,44 +1156,54 @@ def build_ep001_animation(
                     13.0 * math.sin(uf * math.pi * 3.0) + 2.5 * math.cos(fr * 1.8),
                     -10.0 * math.cos(uf * math.pi * 2.5),
                 )
-                cam_fov = _lerp(105.0, 100.0, uf)
+                cam_fov = _lerp(100.0, 96.0, uf)
                 dof_dist = 1.15
                 wing_flap = 18.0 * math.sin(fr * 2.8)
             dof_fstop = 3.2
             ant_pitch, ant_spread, ant_jit = 12.0, 22.0, 11.5
 
         # =====================================================================
-        # SCENE 8: MAAF YA BANG — Dive into dark shadowed face -> panic drop -> BLACK
+        # SCENE 8: MAAF YA BANG — True dramatic dark-shadowed face + crisp halo rim + panic drop!
         # =====================================================================
         elif sid == 8:
-            # Neon strictly BEHIND human (y=2.92) + subtle 0.7W bounce = dramatic dark shadowed face!
-            e_neon = 110.0
-            neon_y = 2.92
-            e_rim = 115.0
+            # Cut front Neon_TL_Tube mesh glow (y=2.05) so ZERO front light washes out his face/chest!
+            # Fire crisp backlight strictly BEHIND his head (y=2.92) -> razor-sharp rim light on hair/shoulders
+            # while his face sits in dramatic deep shadow ("bayangan paling gelap di dapur ini ada tepat di mukanya")!
+            e_neon = 42.0
+            neon_y = 3.18
+            e_neon_emit = 0.35
+            e_rim = 160.0
+            rim_loc = (0.0, 2.86, 1.86)
+            rim_rot = (-68.0, 0.0, 0.0)
             e_fg = 0.0
-            e_face_fill = 0.75
-            w_strength = 0.05
+            e_face_fill = 0.18  # Tiny whisper of cool bounce so panicked wide eyes & mouth stay razor-clear in shadow!
+            e_night = 0.0
+            w_strength = 0.012
 
             dur8 = float(s_meta["scene_duration_sec"])
             t_black = float(s_meta.get("cut_to_black_sec", dur8 - 0.12))
             t_drop = t_black * 0.45
 
             show_wings = True
-            show_speed = True
+            show_speed = False  # Zero stray vertical lines cutting across shirt/face!
             show_black = local_sec >= t_black
 
             h_loc = (0.0, 2.48, 0.0)
             h_yaw = 0.0
+            h_hip_drop = 0.02
             recoil_u = _smooth(max(0.0, (local_sec - t_drop) / max(0.25, t_black - t_drop)))
-            torso_lean = _lerp(4.0, -14.0, recoil_u)
-            head_pitch = _lerp(2.0, -10.0, recoil_u)
+            # Keep torso & head upright/slightly forward so overhead backlight never hits his forehead/chest!
+            torso_lean = _lerp(8.0, 2.0, recoil_u)
+            head_pitch = _lerp(6.0, 3.0, recoil_u)
             expr1, expr2, expr_k = "shock", "panic", recoil_u
-            jaw_ex = 0.25 * recoil_u
+            jaw_ex = 0.28 * recoil_u
 
             if local_sec < t_drop:
                 grip_sandal = True
                 right_hand_target = Vector((-0.26, 2.18, 1.38))
                 left_hand_target = Vector((0.26, 2.22, 1.15))
+                sandal_aim_sole = Vector((0.12, -0.78, -0.61)).normalized()
+                sandal_blade_hint = Vector((-0.15, 0.0, 1.0))
             else:
                 # Throws both arms out in pure terror & releases the Swallow sandal!
                 grip_sandal = False
@@ -1019,16 +1214,25 @@ def build_ep001_animation(
             ease = dive_u ** 1.38
             cx = _lerp(0.04, 0.0, ease) + 0.012 * (1.0 - dive_u) * math.sin(fr * 1.9)
             cy = _lerp(1.28, 2.04, ease)
-            cz = _lerp(1.46, 1.55, ease) + 0.008 * (1.0 - dive_u) * math.cos(fr * 2.1)
+            cz = _lerp(1.46, 1.54, ease) + 0.008 * (1.0 - dive_u) * math.cos(fr * 2.1)
             cam_loc = (cx, cy, cz)
-            cam_rot = (_lerp(94.0, 91.0, ease), 4.0 * math.sin(fr * 2.2) * (1.0 - 0.5 * dive_u), 0.0)
+            cam_rot = (_lerp(94.0, 90.5, ease), 4.0 * math.sin(fr * 2.2) * (1.0 - 0.5 * dive_u), 0.0)
             cam_fov = _lerp(92.0, 74.0, ease)
             dof_fstop = 2.8
-            ant_pitch, ant_spread, ant_jit = -10.0, 24.0, 14.0
+            ant_pitch, ant_spread, ant_jit = -24.0, 30.0, 14.0
             wing_flap = 22.0 * math.sin(fr * 3.1)
 
         # ---- APPLY MPFB2 HUMAN POSE (NEVER A-POSE!) ----
-        mh.place_and_feet(human, h_loc, h_yaw, fr, hip_drop=h_hip_drop, left_foot_override=l_foot_ov)
+        mh.place_and_feet(
+            human,
+            h_loc,
+            h_yaw,
+            fr,
+            hip_drop=h_hip_drop,
+            left_foot_override=l_foot_ov,
+            stance_scale=h_stance_scale,
+            stagger_y=h_stagger_y,
+        )
         mh.lean(arm, torso_lean)
         mh.head_turn(arm, head_yaw, head_pitch)
         mh.D.pose_arms(arm, yaw_deg=h_yaw, elbow=16.0)
@@ -1047,14 +1251,14 @@ def build_ep001_animation(
         mh.key_pose(human, fr)
         mh.set_face(human, t_global, fps, expr1, expr2, expr_k, jaw_extra=jaw_ex, frame=fr)
 
-        # ---- SANDAL JEPIT: ANCHORED DIRECTLY FROM wrist.R EVERY FRAME IN SCENES 1-7! ----
+        # ---- SANDAL JEPIT: HEEL POWER-GRIP ANCHORED DIRECTLY FROM wrist.R IN SCENES 1-7! ----
         if grip_sandal:
             pos_s = mh.snap_sandal_to_right_hand(
                 human,
                 sandal["root"],
                 fr,
-                extra_pitch_deg=sandal_extra_pitch,
-                extra_roll_deg=sandal_extra_roll,
+                aim_sole_dir=sandal_aim_sole,
+                blade_dir_hint=sandal_blade_hint,
             )
             w_now = mh.wp(arm, arm.pose.bones["wrist.R"].head)
             sandal_grip_distances[sid] = max(sandal_grip_distances.get(sid, 0.0), (pos_s - w_now).length)
@@ -1086,7 +1290,7 @@ def build_ep001_animation(
             face_pt = mh.eye_mid(human)
             dof_dist = max(0.15, (face_pt - Vector(cam_loc)).length)
 
-        # ---- CAMERA, MACRO DOF, ANTENNAE, WINGS, VFX, LIGHTS ----
+        # ---- CAMERA, MACRO DOF, ANTENNAE, FRONT LEG TIPS, WINGS, SHADOW ROACH, VFX, LIGHTS ----
         _kf_loc_rot(cam_obj, fr, loc=cam_loc, rot_deg=cam_rot)
         _kf_fov(cam_data, fr, cam_fov)
         _kf_dof(cam_data, fr, dof_dist, fstop=dof_fstop)
@@ -1101,15 +1305,22 @@ def build_ep001_animation(
         _kf_hide(speed_rig["root"], fr, not show_speed)
         _kf_hide(ant_rig["wing_l"], fr, not show_wings)
         _kf_hide(ant_rig["wing_r"], fr, not show_wings)
+        _kf_hide(ant_rig["leg_l"], fr, not show_front_legs)
+        _kf_hide(ant_rig["leg_r"], fr, not show_front_legs)
+        _kf_hide(shadow_roach["root"], fr, not show_shadow_roach)
         _kf_hide(black_shutter, fr, not show_black)
 
         _kf_loc_rot(lights["neon_obj"], fr, loc=(0.0, neon_y, 2.56))
+        _kf_loc_rot(lights["rim_obj"], fr, loc=rim_loc, rot_deg=rim_rot)
         _kf_light(lights["night_light"], fr, e_night)
         _kf_light(lights["neon_light"], fr, e_neon)
         _kf_light(lights["rim_light"], fr, e_rim)
         _kf_light(lights["fg_light"], fr, e_fg)
         _kf_light(lights["face_fill_light"], fr, e_face_fill)
         _kf_light(lights["cyan_light"], fr, e_cyan)
+        _kf_light(lights["roach_spot_light"], fr, e_roach_spot)
+        lights["roach_spot_light"].color = roach_spot_col
+        lights["roach_spot_light"].keyframe_insert(data_path="color", frame=fr)
         _set_neon_emission(env["neon_mat"], fr, e_neon_emit)
         lights["world_bg"].inputs["Strength"].default_value = w_strength
         lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=fr)
@@ -1139,7 +1350,7 @@ def run_qc_checks(
     build_info: Dict[str, Any],
     fps: int,
 ) -> Dict[str, Any]:
-    """Run TROUBLESHOOTING.md checklist: no pink textures, no unparented body parts,
+    """Run TROUBLESHOOTING.md checklist: no pink textures, no shoes (100% nyeker), no unparented parts,
     `$md-*` body keys intact, sandal anchored to wrist.R, and no camera-inside-object black frames.
     """
     import os
@@ -1155,7 +1366,12 @@ def run_qc_checks(
     if missing_imgs:
         issues.append(f"MISSING_TEXTURES: {missing_imgs}")
 
-    # 2. Unparented MPFB2 Human.* meshes -> would float off body!
+    # 2. Shoes must be completely removed (100% nyeker / barefoot Indonesian kosan rule!)
+    shoes_found = [o.name for o in bpy.data.objects if "shoes" in o.name.lower()]
+    if shoes_found:
+        issues.append(f"SHOES_NOT_REMOVED: {shoes_found}")
+
+    # 3. Unparented MPFB2 Human.* meshes -> would float off body!
     unparented = [
         o.name
         for o in bpy.data.objects
@@ -1164,37 +1380,45 @@ def run_qc_checks(
     if unparented:
         issues.append(f"UNPARENTED_HUMAN_PARTS: {unparented}")
 
-    # 3. `$md-*` body shape keys must NOT be zeroed!
+    # 4. `$md-*` body shape keys must NOT be zeroed!
     body = human["body"]
     md_keys = [k for k in body.data.shape_keys.key_blocks if k.name.startswith("$md-")]
     nonzero_md = [k.name for k in md_keys if abs(k.value) > 1e-4]
     if md_keys and not nonzero_md:
         issues.append("BODY_SHAPE_KEYS_ZEROED: all $md-* keys are 0 (body would vanish!)")
 
-    # 4. Sandal grip distance to wrist.R in Scenes 1-7
+    # 5. Sandal grip distance to wrist.R in Scenes 1-7
     bad_grip = {sid: round(d, 3) for sid, d in build_info["sandal_grip_distances"].items() if sid <= 7 and d > 0.25}
     if bad_grip:
         issues.append(f"FLOATING_SANDAL: {bad_grip}")
 
-    # 5. Camera unobstructed raycast check on all 8 storyboard frames (no black frame inside prop!)
+    # 6. Camera unobstructed raycast check on all 9 storyboard frames (01A, 01B, 02..08)
     cam_obj = build_info["cam_obj"]
     dg = bpy.context.evaluated_depsgraph_get()
-    blocked_scenes: List[Tuple[int, str, float]] = []
+    blocked_scenes: List[Tuple[str, str, float]] = []
+    check_frames: List[Tuple[str, int]] = []
     for sid, s_meta in sorted(build_info["tmap"].items()):
-        fr = pick_storyboard_frame(s_meta, fps)
+        if sid == 1:
+            check_frames.append(("01A", pick_scene01a_frame(s_meta, fps)))
+            check_frames.append(("01B", pick_storyboard_frame(s_meta, fps)))
+        else:
+            check_frames.append((f"{sid:02d}", pick_storyboard_frame(s_meta, fps)))
+
+    for label, fr in check_frames:
         scene.frame_set(fr)
         bpy.context.view_layer.update()
         origin = cam_obj.matrix_world.translation.copy()
         fwd = (cam_obj.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
         hit, hit_loc, _, _, hit_obj, _ = scene.ray_cast(dg, origin + fwd * 0.015, fwd, distance=0.06)
         if hit and hit_obj and not hit_obj.name.startswith(("Cockroach_", "Speed_Line", "CutToBlack")):
-            blocked_scenes.append((sid, hit_obj.name, round((hit_loc - origin).length, 4)))
+            blocked_scenes.append((label, hit_obj.name, round((hit_loc - origin).length, 4)))
     if blocked_scenes:
         issues.append(f"CAMERA_BLOCKED: {blocked_scenes}")
 
     report = {
         "passed": len(issues) == 0,
         "missing_textures": missing_imgs,
+        "shoes_found": shoes_found,
         "unparented_human_parts": unparented,
         "md_body_keys_preserved": len(nonzero_md),
         "sandal_grip_max_dist_m": {k: round(v, 3) for k, v in sorted(build_info["sandal_grip_distances"].items())},
@@ -1204,8 +1428,8 @@ def run_qc_checks(
     if report["passed"]:
         log(
             "QC",
-            f"ALL CHECKS PASSED | MISSING=[] | unparented=0 | $md keys={len(nonzero_md)} intact | "
-            f"sandal_dist={report['sandal_grip_max_dist_m']} | camera_clear=ALL",
+            f"ALL CHECKS PASSED | MISSING=[] | shoes=0 (nyeker!) | unparented=0 | "
+            f"$md keys={len(nonzero_md)} intact | sandal_dist={report['sandal_grip_max_dist_m']} | camera_clear=ALL (9 panels)",
         )
     else:
         log("QC_WARN", f"QC detected issues: {issues}")
@@ -1326,14 +1550,33 @@ def render_storyboard_keyframe(
     fps: int,
     apply_post: bool = True,
 ) -> Path:
+    import shutil
+
     sid = int(scene_meta["scene_id"])
-    hero_frame = pick_storyboard_frame(scene_meta, fps)
     dur = float(scene_meta["scene_duration_sec"])
 
-    out_png = scenes_out_dir / f"scene_{sid:02d}.png"
-    log("STORYBOARD", f"Rendering Scene {sid:02d} hero frame {hero_frame} -> {out_png.name}")
-    dt = _render_single_frame_resilient(scene, hero_frame, out_png, apply_post=apply_post)
-    log("STORYBOARD", f"Scene {sid:02d} rendered in {dt:.1f}s (post.py={'ON' if apply_post else 'OFF'})")
+    if sid == 1:
+        # Render BOTH 01A (Remang Jam 2) and 01B (Lampu Nyala) for the 9-panel studio storyboard_sheet.png!
+        fr_a = pick_scene01a_frame(scene_meta, fps)
+        out_a = scenes_out_dir / "scene_01a.png"
+        log("STORYBOARD", f"Rendering Scene 01A (Remang Jam 2) frame {fr_a} -> {out_a.name}")
+        dt_a = _render_single_frame_resilient(scene, fr_a, out_a, apply_post=apply_post)
+        log("STORYBOARD", f"Scene 01A rendered in {dt_a:.1f}s (post.py={'ON' if apply_post else 'OFF'})")
+
+        fr_b = pick_storyboard_frame(scene_meta, fps)
+        out_b = scenes_out_dir / "scene_01b.png"
+        log("STORYBOARD", f"Rendering Scene 01B (Lampu Nyala) frame {fr_b} -> {out_b.name}")
+        dt_b = _render_single_frame_resilient(scene, fr_b, out_b, apply_post=apply_post)
+        log("STORYBOARD", f"Scene 01B rendered in {dt_b:.1f}s (post.py={'ON' if apply_post else 'OFF'})")
+
+        out_png = scenes_out_dir / "scene_01.png"
+        shutil.copy2(out_b, out_png)
+    else:
+        hero_frame = pick_storyboard_frame(scene_meta, fps)
+        out_png = scenes_out_dir / f"scene_{sid:02d}.png"
+        log("STORYBOARD", f"Rendering Scene {sid:02d} hero frame {hero_frame} -> {out_png.name}")
+        dt = _render_single_frame_resilient(scene, hero_frame, out_png, apply_post=apply_post)
+        log("STORYBOARD", f"Scene {sid:02d} rendered in {dt:.1f}s (post.py={'ON' if apply_post else 'OFF'})")
 
     out_mp4 = scenes_out_dir / f"scene_{sid:02d}.mp4"
     cmd = [
@@ -1415,6 +1658,43 @@ def build_storyboard_contact_sheet(
     return grid_out_path
 
 
+def build_studio_storyboard_sheet(
+    spec_path: Path,
+    timing_path: Path,
+    scenes_out_dir: Path,
+    sheet_out_path: Path,
+) -> Optional[Path]:
+    """Invoke `build_storyboard_sheet.py` via system Python (Pillow) to create 9-panel studio sheet."""
+    import shutil
+
+    sheet_script = SCRIPT_DIR / "build_storyboard_sheet.py"
+    if not sheet_script.exists():
+        log("WARN", f"build_storyboard_sheet.py not found at {sheet_script}")
+        return None
+    py_bin = shutil.which("python3") or sys.executable
+    try:
+        subprocess.run(
+            [
+                py_bin,
+                str(sheet_script),
+                "--spec",
+                str(spec_path),
+                "--timing",
+                str(timing_path),
+                "--scenes-dir",
+                str(scenes_out_dir),
+                "--out",
+                str(sheet_out_path),
+            ],
+            check=True,
+        )
+        log("STORYBOARD", f"Studio 9-panel storyboard_sheet.png ready -> {sheet_out_path}")
+        return sheet_out_path
+    except Exception as exc:
+        log("WARN", f"Could not generate storyboard_sheet.png via {py_bin}: {exc}")
+        return None
+
+
 def parse_args() -> argparse.Namespace:
     argv = sys.argv
     extra = argv[argv.index("--") + 1 :] if "--" in argv else []
@@ -1470,11 +1750,13 @@ def main() -> int:
     scene = bpy.context.scene
     configure_render_engine(scene, args.engine, args.mode, fps)
 
-    # In fast storyboard mode (without --bake-all or --save-blend), only bake the 8 hero storyboard frames!
+    # In fast storyboard mode (without --bake-all or --save-blend), only bake the 9 hero storyboard frames!
     bake_frames: Optional[List[int]] = None
     if args.mode == "storyboard" and not args.bake_all and not args.save_blend:
         bake_frames = [1]
         for s_meta in manifest["scenes"]:
+            if int(s_meta["scene_id"]) == 1:
+                bake_frames.append(pick_scene01a_frame(s_meta, fps))
             bake_frames.append(pick_storyboard_frame(s_meta, fps))
             if int(s_meta["scene_id"]) == 8:
                 # Also bake pre-drop frame in Scene 8 so sandal drop anchor is exact!
@@ -1522,6 +1804,8 @@ def main() -> int:
     if args.mode == "storyboard":
         grid_ids = sorted(tmap.keys()) if len(target_ids) > 1 or args.scene is None else target_ids
         build_storyboard_contact_sheet(grid_ids, scenes_out_dir, work_dir / "storyboard_grid.png", ffmpeg_bin)
+        if args.scene is None:
+            build_studio_storyboard_sheet(spec_path, timing_path, scenes_out_dir, work_dir / "storyboard_sheet.png")
 
     log("RENDER", f"Completed rendering {len(target_ids)} scene(s) in mode '{args.mode}' ({args.engine}).")
     return 0
