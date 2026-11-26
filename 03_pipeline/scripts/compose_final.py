@@ -222,13 +222,44 @@ def concatenate_scene_videos(
     """Concatenate scene_01.mp4 .. scene_0N.mp4 cleanly in timeline order."""
     concat_list = scenes_dir / "concat_list.txt"
     lines: List[str] = []
+    fps = int(manifest.get("fps", 30))
     for scene in manifest["scenes"]:
         sid = int(scene["scene_id"])
         clip = scenes_dir / f"scene_{sid:02d}.mp4"
         if not clip.exists():
-            raise FileNotFoundError(
-                f"Missing rendered clip for scene {sid}: {clip}. Run build_and_render.py first."
-            )
+            still_png = scenes_dir / f"scene_{sid:02d}.png"
+            if still_png.exists():
+                dur = float(scene["scene_duration_sec"])
+                subprocess.run(
+                    [
+                        ffmpeg_bin,
+                        "-y",
+                        "-loop",
+                        "1",
+                        "-i",
+                        str(still_png),
+                        "-t",
+                        f"{dur:.4f}",
+                        "-r",
+                        str(fps),
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-crf",
+                        "20",
+                        "-preset",
+                        "ultrafast",
+                        str(clip),
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                )
+            else:
+                raise FileNotFoundError(
+                    f"Missing rendered clip for scene {sid}: {clip}. Run build_and_render.py first."
+                )
         safe_path = str(clip.resolve()).replace("'", "'\\''")
         lines.append(f"file '{safe_path}'")
 
@@ -444,7 +475,7 @@ def main() -> int:
     parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
     parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets directory")
     parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
-    parser.add_argument("--mode", choices=["preview", "final"], default="final")
+    parser.add_argument("--mode", choices=["storyboard", "preview", "final"], default="final")
     parser.add_argument("--output", type=str, default=None, help="Override final output .mp4 path")
     parser.add_argument(
         "--dry-run-video",
@@ -470,7 +501,12 @@ def main() -> int:
 
     # Optional dry-run video generator so full audio/subtitle/FFmpeg pipeline can be verified without Blender
     if args.dry_run_video:
-        w, h = (540, 960) if args.mode == "preview" else (1080, 1920)
+        if args.mode == "storyboard":
+            w, h = (360, 640)
+        elif args.mode == "preview":
+            w, h = (540, 960)
+        else:
+            w, h = (1080, 1920)
         fps = int(manifest.get("fps", 30))
         colors = ["#0c1933", "#1e2a38", "#073440", "#2f3542", "#1b2631", "#3b1d1d", "#2c2214", "#121212"]
         for s in manifest["scenes"]:
@@ -508,7 +544,12 @@ def main() -> int:
     generate_ass_subtitles(manifest, ass_path, width=w, height=h)
 
     ep_slug = spec["episode_id"].lower()
-    default_out_name = f"final_{ep_slug}.mp4" if args.mode == "final" else f"preview_{ep_slug}.mp4"
+    if args.mode == "final":
+        default_out_name = f"final_{ep_slug}.mp4"
+    elif args.mode == "storyboard":
+        default_out_name = f"animatic_{ep_slug}.mp4"
+    else:
+        default_out_name = f"preview_{ep_slug}.mp4"
     output_mp4 = Path(args.output).resolve() if args.output else (work_dir / default_out_name)
 
     mix_audio_and_compose(spec, manifest, concat_mp4, ass_path, assets_dir, output_mp4, ffmpeg_bin)

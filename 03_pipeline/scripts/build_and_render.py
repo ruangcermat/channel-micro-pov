@@ -58,7 +58,44 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
     scene.render.fps = fps
     scene.render.fps_base = 1.0
 
-    if mode == "preview":
+    # 1. Auto-detect NVIDIA GPU (OPTIX -> CUDA); fallback safely to CPU
+    has_gpu = False
+    device_used = "CPU"
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        for compute_type in ("OPTIX", "CUDA"):
+            try:
+                prefs.compute_device_type = compute_type
+                prefs.get_devices()
+                gpu_devices = [d for d in prefs.devices if d.type == compute_type]
+                if gpu_devices:
+                    for d in prefs.devices:
+                        d.use = d.type == compute_type
+                    scene.cycles.device = "GPU"
+                    has_gpu = True
+                    device_used = f"GPU ({compute_type}: {gpu_devices[0].name})"
+                    break
+            except Exception:
+                continue
+        if not has_gpu:
+            scene.cycles.device = "CPU"
+    except Exception:
+        scene.cycles.device = "CPU"
+
+    # 2. Configure resolution & samples based on mode and hardware availability
+    if mode == "storyboard" or not has_gpu:
+        if mode != "storyboard" and not has_gpu:
+            log("BLENDER", f"No GPU detected — automatically falling back to Cycles CPU (360x640, 8 samples, OIDN) for mode '{mode}'.")
+        scene.render.resolution_x = 360
+        scene.render.resolution_y = 640
+        scene.cycles.samples = 8
+        scene.cycles.adaptive_threshold = 0.08
+        scene.cycles.max_bounces = 3
+        scene.cycles.diffuse_bounces = 2
+        scene.cycles.glossy_bounces = 2
+        scene.cycles.transmission_bounces = 2
+        scene.cycles.transparent_max_bounces = 4
+    elif mode == "preview":
         scene.render.resolution_x = 540
         scene.render.resolution_y = 960
         scene.cycles.samples = 16
@@ -86,8 +123,8 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
     if hasattr(scene.cycles, "denoising_input_passes"):
         scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
 
-    # Motion blur gives 300 km/h sprint and whip-pans cinematic punch!
-    scene.render.use_motion_blur = True
+    # Motion blur for moving video renders; disable in storyboard for crisp still frames
+    scene.render.use_motion_blur = mode != "storyboard"
     scene.render.motion_blur_shutter = 0.35
 
     # Output crisp PNG frames per scene (robust against Colab disconnects)
@@ -106,28 +143,6 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
         except Exception:
             pass
     scene.view_settings.exposure = -0.35
-
-    # Detect NVIDIA T4 GPU: try OPTIX first, then CUDA, else CPU
-    device_used = "CPU"
-    try:
-        prefs = bpy.context.preferences.addons["cycles"].preferences
-        for compute_type in ("OPTIX", "CUDA"):
-            try:
-                prefs.compute_device_type = compute_type
-                prefs.get_devices()
-                gpu_devices = [d for d in prefs.devices if d.type == compute_type]
-                if gpu_devices:
-                    for d in prefs.devices:
-                        d.use = d.type == compute_type
-                    scene.cycles.device = "GPU"
-                    device_used = f"GPU ({compute_type}: {gpu_devices[0].name})"
-                    break
-            except Exception:
-                continue
-        if device_used == "CPU":
-            scene.cycles.device = "CPU"
-    except Exception:
-        scene.cycles.device = "CPU"
 
     log(
         "BLENDER",
@@ -851,6 +866,109 @@ def render_scene_clip(
     return out_mp4
 
 
+def render_storyboard_keyframe(
+    scene: bpy.types.Scene,
+    scene_meta: Dict[str, Any],
+    scenes_out_dir: Path,
+    ffmpeg_bin: str,
+    fps: int,
+) -> Path:
+    """Render 1 middle keyframe still for a scene and wrap it as a still MP4 matching VO duration."""
+    sid = int(scene_meta["scene_id"])
+    f_start = int(scene_meta["start_frame"])
+    f_end = int(scene_meta["end_frame"])
+    mid_frame = (f_start + f_end) // 2
+    dur = float(scene_meta["scene_duration_sec"])
+
+    out_png = scenes_out_dir / f"scene_{sid:02d}.png"
+    scene.frame_set(mid_frame)
+    scene.render.filepath = str(out_png)
+
+    log("STORYBOARD", f"Rendering Scene {sid:02d} keyframe (frame {mid_frame}) -> {out_png.name}")
+    bpy.ops.render.render(write_still=True)
+
+    out_mp4 = scenes_out_dir / f"scene_{sid:02d}.mp4"
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        str(out_png),
+        "-t",
+        f"{dur:.4f}",
+        "-r",
+        str(fps),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "20",
+        "-preset",
+        "ultrafast",
+        str(out_mp4),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    log("STORYBOARD", f"Scene {sid:02d} animatic clip ready ({dur:.2f}s) -> {out_mp4.name}")
+    return out_png
+
+
+def build_storyboard_contact_sheet(
+    scene_ids: List[int],
+    scenes_out_dir: Path,
+    grid_out_path: Path,
+    ffmpeg_bin: str,
+) -> Path:
+    """Combine rendered scene keyframes into a 2x4 contact sheet grid with Scene 01..08 labels."""
+    font_path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+    font_opt = f"fontfile={font_path}:" if font_path.exists() else ""
+
+    inputs: List[str] = []
+    filters: List[str] = []
+    valid_labels: List[str] = []
+
+    for idx, sid in enumerate(sorted(scene_ids)):
+        png_path = scenes_out_dir / f"scene_{sid:02d}.png"
+        if not png_path.exists():
+            continue
+        inputs.extend(["-i", str(png_path)])
+        in_idx = len(valid_labels)
+        lbl = f"t{in_idx}"
+        filters.append(
+            f"[{in_idx}:v]drawtext={font_opt}text='Scene {sid:02d}':"
+            f"fontsize=26:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=8:x=12:y=12[{lbl}]"
+        )
+        valid_labels.append(f"[{lbl}]")
+
+    if not valid_labels:
+        raise RuntimeError("No storyboard PNGs found to assemble contact sheet.")
+
+    n = len(valid_labels)
+    cols = 4 if n > 4 else n
+    rows = max(1, (n + cols - 1) // cols)
+    filters.append(
+        f"{''.join(valid_labels)}concat=n={n}:v=1:a=0,tile={cols}x{rows}:padding=8:margin=8:color=0x111827[grid]"
+    )
+
+    grid_out_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        *inputs,
+        "-filter_complex",
+        ";".join(filters),
+        "-map",
+        "[grid]",
+        "-frames:v",
+        "1",
+        str(grid_out_path),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    log("STORYBOARD", f"Contact sheet {rows}x{cols} ready -> {grid_out_path}")
+    return grid_out_path
+
+
 def parse_args() -> argparse.Namespace:
     argv = sys.argv
     extra = argv[argv.index("--") + 1 :] if "--" in argv else []
@@ -863,7 +981,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
     parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets cache directory")
     parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
-    parser.add_argument("--mode", choices=["preview", "final"], default="preview")
+    parser.add_argument("--mode", choices=["storyboard", "preview", "final"], default="preview")
     parser.add_argument(
         "--scene",
         type=int,
@@ -915,7 +1033,14 @@ def main() -> int:
         if sid not in tmap:
             log("ERROR", f"Scene {sid} not found in timing_manifest.json (available: {sorted(tmap.keys())})")
             return 1
-        render_scene_clip(scene, tmap[sid], scenes_out_dir, ffmpeg_bin, fps)
+        if args.mode == "storyboard":
+            render_storyboard_keyframe(scene, tmap[sid], scenes_out_dir, ffmpeg_bin, fps)
+        else:
+            render_scene_clip(scene, tmap[sid], scenes_out_dir, ffmpeg_bin, fps)
+
+    if args.mode == "storyboard":
+        grid_ids = sorted(tmap.keys()) if len(target_ids) > 1 or args.scene is None else target_ids
+        build_storyboard_contact_sheet(grid_ids, scenes_out_dir, work_dir / "storyboard_grid.png", ffmpeg_bin)
 
     log("RENDER", f"Completed rendering {len(target_ids)} scene(s) in mode '{args.mode}'.")
     return 0
