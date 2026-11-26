@@ -120,6 +120,35 @@ def _decode_audio_payload(data: Any) -> bytes:
     raise TypeError(f"Unsupported audio payload type: {type(data)}")
 
 
+def _wrap_print(prefix: str, text: str, width: int = 100) -> None:
+    """Print long error/payload messages wrapped cleanly across lines."""
+    import textwrap
+
+    for raw_line in text.splitlines() or [""]:
+        wrapped = textwrap.wrap(raw_line, width=width, break_long_words=True, break_on_hyphens=False)
+        if not wrapped:
+            print(f"[{prefix}]", flush=True)
+        else:
+            for line in wrapped:
+                print(f"[{prefix}] {line}", flush=True)
+
+
+def _extract_audio_from_response(response: Any, model_id: str) -> bytes:
+    for candidate in getattr(response, "candidates", []) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", []) or []:
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data is not None and getattr(inline_data, "data", None):
+                mime = getattr(inline_data, "mime_type", "") or ""
+                raw_bytes = _decode_audio_payload(inline_data.data)
+                if raw_bytes[:4] == b"RIFF":
+                    log("TTS", f"Received WAV (RIFF) audio ({len(raw_bytes)} bytes, mime={mime or 'audio/wav'})")
+                else:
+                    log("TTS", f"Received raw PCM audio ({len(raw_bytes)} bytes, mime={mime or 'audio/l16'}); wrapping with 24kHz mono WAV header")
+                return raw_bytes
+    raise RuntimeError(f"Model {model_id} returned no inline audio data: {repr(response)}")
+
+
 def synthesize_with_gemini(
     client: Any,
     model_id: str,
@@ -127,87 +156,85 @@ def synthesize_with_gemini(
     style_prompt: str,
     voice_name: str,
 ) -> bytes:
-    """Call Gemini 3.8 TTS with strict separation between verbatim text and speech_metadata.
+    """Call Gemini 3.8 TTS (v1beta) via client.models.generate_content.
 
-    Supports both:
-    1. Official Gemini 3.8 Interactions API (`client.interactions.create`)
-    2. Fallback GenerateContent API (`client.models.generate_content`) with part-level `speech_metadata`
+    Strict separation:
+    - contents[].parts[].text contains ONLY verbatim vo_text
+    - contents[].parts[].speech_metadata contains ONLY {"style": style_prompt}
+    - config.speech_config.voice_config uses {"voice": voice_name} with fallback to
+      {"prebuilt_voice_config": {"voice_name": voice_name}} only if SDK rejects "voice".
     """
-    # Clean verbatim text ONLY — never prepend style/delivery directions!
     clean_text = vo_text.strip()
     if not clean_text:
         raise ValueError("vo_text is empty")
 
-    # Path 1: Official Gemini 3.8 TTS Interactions API (google-genai >= 2.24.0)
-    if hasattr(client, "interactions"):
-        try:
-            interaction = client.interactions.create(
-                model=model_id,
-                input=[
-                    {
-                        "type": "text",
-                        "text": clean_text,
-                        "annotations": [
-                            {
-                                "type": "speech_metadata",
-                                "style": style_prompt,
-                            }
-                        ],
-                    }
-                ],
-                response_format={"type": "audio"},
-                generation_config={
-                    "speech_config": [
-                        {"voice": voice_name}
-                    ]
-                },
-            )
-            if hasattr(interaction, "output_audio") and getattr(interaction.output_audio, "data", None):
-                return _decode_audio_payload(interaction.output_audio.data)
-            # Some SDK builds expose outputs list
-            for out in getattr(interaction, "outputs", []) or []:
-                if getattr(out, "type", None) == "audio" and getattr(out, "data", None):
-                    return _decode_audio_payload(out.data)
-            raise RuntimeError("Interactions API returned no audio payload")
-        except Exception as interactions_err:
-            log("TTS", f"Interactions API note ({model_id}): {interactions_err}; trying generate_content...")
-
-    # Path 2: GenerateContent API with structured part-level speech_metadata
-    response = client.models.generate_content(
-        model=model_id,
-        contents=[
-            {
-                "role": "user",
-                "parts": [
-                    {
-                        "text": clean_text,
-                        "speech_metadata": {
-                            "style": style_prompt,
-                        },
-                    }
-                ],
-            }
-        ],
-        config={
-            "response_modalities": ["AUDIO"],
-            "speech_config": {
-                "voice_config": {
-                    "prebuilt_voice_config": {
-                        "voice_name": voice_name,
-                    }
+    contents = [
+        {
+            "role": "user",
+            "parts": [
+                {
+                    "text": clean_text,
+                    "speech_metadata": {
+                        "style": style_prompt,
+                    },
                 }
-            },
+            ],
+        }
+    ]
+
+    primary_config = {
+        "response_modalities": ["AUDIO"],
+        "speech_config": {
+            "voice_config": {
+                "voice": voice_name,
+            }
         },
-    )
+    }
+    fallback_config = {
+        "response_modalities": ["AUDIO"],
+        "speech_config": {
+            "voice_config": {
+                "prebuilt_voice_config": {
+                    "voice_name": voice_name,
+                }
+            }
+        },
+    }
 
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            inline_data = getattr(part, "inline_data", None)
-            if inline_data is not None and getattr(inline_data, "data", None):
-                return _decode_audio_payload(inline_data.data)
+    payload_primary = {"model": model_id, "contents": contents, "config": primary_config}
+    try:
+        response = client.models.generate_content(
+            model=model_id,
+            contents=contents,
+            config=primary_config,
+        )
+        return _extract_audio_from_response(response, model_id)
+    except Exception as exc:
+        err_str = str(exc)
+        _wrap_print("TTS_ERR", f"Primary voice_config.{{\"voice\"}} failed on {model_id}: {err_str}")
+        _wrap_print("TTS_PAYLOAD", f"repr(payload) = {repr(payload_primary)}")
 
-    raise RuntimeError(f"Model {model_id} returned no inline audio data")
+        # Fallback to prebuilt_voice_config ONLY if SDK/schema rejected the "voice" key
+        voice_key_rejected = any(
+            marker in err_str.lower()
+            for marker in ("voice", "prebuilt_voice_config", "extra inputs", "validation", "unknown field", "unexpected keyword")
+        )
+        if not voice_key_rejected:
+            raise
+
+        payload_fallback = {"model": model_id, "contents": contents, "config": fallback_config}
+        log("TTS", f"Retrying {model_id} with prebuilt_voice_config fallback...")
+        try:
+            response = client.models.generate_content(
+                model=model_id,
+                contents=contents,
+                config=fallback_config,
+            )
+            return _extract_audio_from_response(response, model_id)
+        except Exception as exc2:
+            _wrap_print("TTS_ERR", f"Fallback prebuilt_voice_config failed on {model_id}: {exc2}")
+            _wrap_print("TTS_PAYLOAD", f"repr(payload) = {repr(payload_fallback)}")
+            raise
 
 
 def synthesize_scene_with_fallback(
@@ -238,7 +265,7 @@ def synthesize_scene_with_fallback(
                 return audio_bytes, model_id
             except Exception as exc:
                 last_err = exc
-                log("TTS", f"Attempt {attempt}/{retries} failed on {model_id}: {exc}")
+                _wrap_print("TTS", f"Attempt {attempt}/{retries} failed on {model_id}: {exc}")
                 if attempt < retries:
                     time.sleep(2.0 * attempt)
         log("TTS", f"Switching from {model_id} to fallback model...")
@@ -352,7 +379,7 @@ def main() -> int:
         except ImportError as exc:
             log("ERROR", f"google-genai SDK belum terinstall (`pip install 'google-genai>=2.24.0'`): {exc}")
             return 1
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
 
     log("TTS", f"Episode: {spec['episode_id']} | Primary: {primary_model} | Fallback: {fallback_model} | Voice: {voice_name}")
     log("TTS", f"VO output dir: {vo_dir}")
