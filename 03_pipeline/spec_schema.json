@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MicroPOV_Episode_Spec",
+  "type": "object",
+  "required": [
+    "episode_id",
+    "title",
+    "universe",
+    "target_duration_sec",
+    "pov_config",
+    "bgm_plan",
+    "scenes"
+  ],
+  "properties": {
+    "episode_id": {
+      "type": "string",
+      "pattern": "^EP[0-9]{3}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "universe": {
+      "type": "string"
+    },
+    "target_duration_sec": {
+      "type": "number"
+    },
+    "pov_config": {
+      "type": "object",
+      "required": [
+        "subject",
+        "camera_height_m",
+        "base_fov_deg",
+        "visual_style"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string"
+        },
+        "camera_height_m": {
+          "type": "number"
+        },
+        "base_fov_deg": {
+          "type": "number"
+        },
+        "visual_style": {
+          "type": "string"
+        },
+        "hud_or_foreground": {
+          "type": "string"
+        }
+      }
+    },
+    "bgm_plan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "bgm_id",
+          "start_scene",
+          "end_scene",
+          "mood"
+        ],
+        "properties": {
+          "bgm_id": {
+            "type": "string"
+          },
+          "start_scene": {
+            "type": "integer"
+          },
+          "end_scene": {
+            "type": "integer"
+          },
+          "mood": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "scene_id",
+          "est_duration_sec",
+          "vo_text",
+          "vo_delivery",
+          "camera_motion",
+          "visual_action",
+          "assets_used",
+          "sfx_cues",
+          "lighting"
+        ],
+        "properties": {
+          "scene_id": {
+            "type": "integer"
+          },
+          "est_duration_sec": {
+            "type": "number"
+          },
+          "vo_text": {
+            "type": "string"
+          },
+          "vo_delivery": {
+            "type": "string"
+          },
+          "camera_motion": {
+            "type": "string"
+          },
+          "visual_action": {
+            "type": "string"
+          },
+          "assets_used": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "sfx_cues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "sfx_id",
+                "offset_sec"
+              ],
+              "properties": {
+                "sfx_id": {
+                  "type": "string"
+                },
+                "offset_sec": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "lighting": {
+            "type": "string"
+          },
+          "on_screen_text": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

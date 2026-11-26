@@ -1,0 +1,161 @@
+{
+  "episode_id": "EP001",
+  "title": "POV Kamu Jadi Kecoak di Dapur Jam 2 Pagi",
+  "universe": "Semesta Kosan",
+  "target_duration_sec": 40,
+  "tts_config": {
+    "provider": "gemini_tts",
+    "model": "gemini-3.8-flash-tts",
+    "fallback_model": "gemini-3.8-flash-lite-tts",
+    "language": "id-ID",
+    "voice_persona": "Teman nongkrong Indonesia yang ekspresif, ritme cepat, tengil tapi jelas artikulasinya",
+    "strict_rule": "Jangan pernah gabungkan vo_delivery ke dalam teks input. Kirim vo_delivery secara terpisah ke speech_metadata/style prompt agar tidak terbaca verbatim."
+  },
+  "pov_config": {
+    "subject": "Kecoak dapur dewasa",
+    "camera_height_m": 0.015,
+    "base_fov_deg": 95,
+    "visual_style": "Low-poly stylized bersih, kontras tinggi, skala benda raksasa dari sudut lantai",
+    "hud_or_foreground": "Dua antena tipis melengkung di pinggir kiri-kanan bawah layar yang ikut bergetar sesuai emosi"
+  },
+  "bgm_plan": [
+    {
+      "bgm_id": "sneaky_night_loop",
+      "start_scene": 1,
+      "end_scene": 1,
+      "mood": "tenang dan mengendap-endap"
+    },
+    {
+      "bgm_id": "intense_chase_synth",
+      "start_scene": 2,
+      "end_scene": 7,
+      "mood": "tegang, tempo cepat seperti film aksi"
+    },
+    {
+      "bgm_id": "none_cut_silence",
+      "start_scene": 8,
+      "end_scene": 8,
+      "mood": "hening mendadak lalu pecah komedi"
+    }
+  ],
+  "scenes": [
+    {
+      "scene_id": 1,
+      "est_duration_sec": 4.0,
+      "vo_text": "Jam dua pagi. Lampu dapur mendadak nyala. Masalahnya, kamu lagi jadi kecoak yang kepergok nyeruput kuah mi.",
+      "vo_delivery": "Santai dan pelan di kalimat pertama, lalu kaget dan cepat dengan nada apes",
+      "camera_motion": "Diam rendah menghadap genangan kuah, lalu mendadak tersentak ke atas saat cahaya putih menyilaukan menyala",
+      "visual_action": "Lantai dapur gelap kebiruan. Di depan kamera ada genangan kuah mi kuning reflektif dan potongan mi low-poly raksasa. Detik ke-1.1 ruangan meledak terang benderang putih neon. Dua antena di tepi layar langsung kaku berdiri.",
+      "assets_used": ["kitchen_tile_floor", "indomie_bowl_spill"],
+      "sfx_cues": [
+        {"sfx_id": "light_switch_click", "offset_sec": 1.0},
+        {"sfx_id": "fluorescent_hum", "offset_sec": 1.1}
+      ],
+      "lighting": "Gelap malam biru redup -> Flash putih neon terang ekstrem",
+      "on_screen_text": "JAM 2 PAGI"
+    },
+    {
+      "scene_id": 2,
+      "est_duration_sec": 4.0,
+      "vo_text": "Di depanmu, raksasa udah melotot—tangannya ngangkat sandal jepit ijo.",
+      "vo_delivery": "Dramatis seperti narator trailer film aksi",
+      "camera_motion": "Tilt ekstrem ke atas (low angle), zoom-in patah-patah ke arah tangan yang mengangkat sandal",
+      "visual_action": "Siluet manusia berkaus oblong menjulang seperti gedung dari sudut lantai. Cahaya menyorot sandal jepit putih-hijau di tangan kanan yang terangkat tinggi.",
+      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant", "sandal_jepit_swallow"],
+      "sfx_cues": [
+        {"sfx_id": "dramatic_boom", "offset_sec": 0.2},
+        {"sfx_id": "dramatic_boom", "offset_sec": 2.4}
+      ],
+      "lighting": "Backlight lampu neon dari belakang kepala manusia seperti boss terakhir game",
+      "on_screen_text": "BOSS TERAKHIR"
+    },
+    {
+      "scene_id": 3,
+      "est_duration_sec": 5.0,
+      "vo_text": "Tenang, kamu punya cheat code. Dua antena di pantatmu langsung nangkep angin dari ayunan tangannya.",
+      "vo_delivery": "Percaya diri, cepat, penekanan kocak di kata 'cheat code' dan 'pantatmu'",
+      "camera_motion": "Slow-motion dramatis (bullet time), kamera sedikit miring menatap sandal yang mulai mengayun turun",
+      "visual_action": "Garis gelombang udara (wind lines) bercahaya cyan melesat dari arah sandal yang mulai turun ke arah kamera. Gerakan melambat drastis.",
+      "assets_used": ["kitchen_tile_floor", "sandal_jepit_swallow"],
+      "sfx_cues": [
+        {"sfx_id": "wind_whoosh_heavy", "offset_sec": 2.2}
+      ],
+      "lighting": "Kontras aksen cyan menyala pada efek aliran udara",
+      "on_screen_text": "CHEAT CODE AKTIF"
+    },
+    {
+      "scene_id": 4,
+      "est_duration_sec": 6.0,
+      "vo_text": "Lebih cepat dari kedipan mata, kakimu udah tancap gas duluan—buat ukuran tubuhmu, itu setara lari tiga ratus kilometer per jam!",
+      "vo_delivery": "Sangat cepat, bersemangat, memacu adrenalin",
+      "camera_motion": "Sprint POV super cepat dengan camera shake halus, FOV melebar ke 112 derajat agar terasa ngebut ekstrem",
+      "visual_action": "Sandal jepit raksasa menghantam lantai tepat di belakang kamera menimbulkan kepulan debu low-poly. Kamera langsung melesat kencang menyusuri garis nat keramik.",
+      "assets_used": ["kitchen_tile_floor", "sandal_jepit_swallow"],
+      "sfx_cues": [
+        {"sfx_id": "sandal_slam_thud", "offset_sec": 0.5},
+        {"sfx_id": "skitter_fast", "offset_sec": 0.9}
+      ],
+      "lighting": "Terang dinamis dengan garis kecepatan halus di tepi layar",
+      "on_screen_text": "300 KM/JAM"
+    },
+    {
+      "scene_id": 5,
+      "est_duration_sec": 4.0,
+      "vo_text": "Kolong kulkas tinggal sejengkal lagi...",
+      "vo_delivery": "Penuh harapan, terengah-engah tapi optimis",
+      "camera_motion": "Melesat lurus cepat mengarah ke celah gelap di bawah kulkas",
+      "visual_action": "Celah gelap di bawah kulkas terlihat makin dekat seperti garis finis. Di akhir detik ke-3, bayangan kaki besar jatuh menutupi jalur di depan kamera.",
+      "assets_used": ["kitchen_tile_floor", "fridge_under_gap"],
+      "sfx_cues": [
+        {"sfx_id": "skitter_fast", "offset_sec": 0.0},
+        {"sfx_id": "dramatic_boom", "offset_sec": 3.0}
+      ],
+      "lighting": "Bayangan gelap tiba-tiba jatuh memotong cahaya lantai di depan kamera",
+      "on_screen_text": "TINGGAL SEJENGKAL"
+    },
+    {
+      "scene_id": 6,
+      "est_duration_sec": 5.0,
+      "vo_text": "Eh, kaki kirinya nutup jalan! Kiri tembok, kanan buntu, sandal udah mau jatuh.",
+      "vo_delivery": "Panik mendadak, ritme cepat dan patah-patah",
+      "camera_motion": "Rem mendadak, whip-pan cepat ke kiri (tembok), whip-pan ke kanan (buntu/kardus), whip-pan ke atas (sandal siap jatuh)",
+      "visual_action": "Kaki manusia raksasa memblokir celah kolong kulkas. Kamera menoleh panik kiri-kanan-atas menunjukkan posisi benar-benar terkepung.",
+      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant", "sandal_jepit_swallow", "fridge_under_gap"],
+      "sfx_cues": [
+        {"sfx_id": "record_scratch", "offset_sec": 0.1},
+        {"sfx_id": "wind_whoosh_heavy", "offset_sec": 3.2}
+      ],
+      "lighting": "Terang tajam penuh tekanan",
+      "on_screen_text": "TERKEPUNG!"
+    },
+    {
+      "scene_id": 7,
+      "est_duration_sec": 6.5,
+      "vo_text": "Sisa satu tombol darurat. Kamu buka sayap. Jujur, kamu nggak bisa nyetir—cuma asal terbang nyari tempat paling gelap.",
+      "vo_delivery": "Dramatis di dua kalimat awal, lalu mendadak jujur dan agak konyol di kalimat 'nggak bisa nyetir'",
+      "camera_motion": "Kamera lepas landas dari lantai secara oleng tidak stabil lalu menanjak cepat",
+      "visual_action": "Dua sayap transparan kecokelatan terbuka bergetar di sisi kiri-kanan layar. Kamera naik zig-zag oleng meninggalkan lantai dapur.",
+      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant"],
+      "sfx_cues": [
+        {"sfx_id": "wings_buzz_loud", "offset_sec": 1.6}
+      ],
+      "lighting": "Lampu neon di atas silau, membuat area wajah/dada manusia terlihat sebagai bayangan paling gelap di ruangan",
+      "on_screen_text": "MODE TERBANG"
+    },
+    {
+      "scene_id": 8,
+      "est_duration_sec": 5.5,
+      "vo_text": "Dan kebetulan, bayangan paling gelap di dapur ini ada tepat di mukanya. Maaf ya, bang.",
+      "vo_delivery": "Santai, usil, tengil penuh kemenangan pada 'Maaf ya, bang'",
+      "camera_motion": "Melesat lurus menukik cepat tepat ke arah wajah siluet manusia yang langsung menjatuhkan sandalnya",
+      "visual_action": "Kamera ngebut menuju wajah manusia. Manusia terbelalak, sandal jepit terlepas jatuh, dan tepat 0.2 detik sebelum menabrak wajah—LAYAR HITAM mendadak.",
+      "assets_used": ["human_silhouette_giant", "sandal_jepit_swallow"],
+      "sfx_cues": [
+        {"sfx_id": "wings_buzz_loud", "offset_sec": 0.0},
+        {"sfx_id": "human_scream_cut", "offset_sec": 4.7}
+      ],
+      "lighting": "Kontras dramatis di wajah manusia -> Cut to Black di detik 5.2",
+      "on_screen_text": "MAAF YA BANG"
+    }
+  ]
+}
