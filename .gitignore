@@ -1,0 +1,32 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Downloaded/generated binary assets (cached in Google Drive / local cache)
+02_assets/models_3d/*
+!02_assets/models_3d/.gitkeep
+02_assets/textures/*
+!02_assets/textures/.gitkeep
+02_assets/hdri/*
+!02_assets/hdri/.gitkeep
+02_assets/sfx/*
+!02_assets/sfx/.gitkeep
+02_assets/bgm/*
+!02_assets/bgm/.gitkeep
+
+# Rendered episode outputs & intermediate caches
+04_episodes/*/raw_render/
+04_episodes/*/output/
+04_episodes/*/*.mp4
+04_episodes/*/*.ass
+04_episodes/*/*.blend
+04_episodes/*/timing_manifest.json
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak

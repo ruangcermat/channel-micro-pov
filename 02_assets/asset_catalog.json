@@ -1,0 +1,159 @@
+{
+  "catalog_version": "2.0",
+  "instructions_for_agent": "Katalog aset otomatis (Zero-Manual Workflow). Selalu cek cache di Google Drive (/content/drive/MyDrive/channel-micro-pov/02_assets/) terlebih dahulu. Diperbarui otomatis oleh fetch_assets.py, procedural_props.py, dan prepare_audio.py.",
+  "models_3d": [
+    {
+      "id": "kitchen_tile_floor",
+      "category": "environment",
+      "source": "procedural_blender_with_polyhaven_pbr",
+      "license": "CC0",
+      "file": "02_assets/models_3d/kitchen_tile_floor.glb",
+      "procedural_fallback": "Lantai keramik dapur 30x30cm dengan nat nyata dan tekstur PBR Poly Haven interior_tiles",
+      "scale_hint": "1 unit = 1 meter",
+      "cached": false
+    },
+    {
+      "id": "indomie_bowl_spill",
+      "category": "prop",
+      "source": "procedural_blender",
+      "license": "CC0",
+      "file": "02_assets/models_3d/indomie_bowl_spill.glb",
+      "procedural_fallback": "Genangan kuah kuning berminyak reflektif + potongan mi keriting low-poly + serpihan cabai/daun bawang",
+      "scale_hint": "diameter genangan ~0.18m",
+      "cached": false
+    },
+    {
+      "id": "sandal_jepit_swallow",
+      "category": "prop",
+      "source": "procedural_blender",
+      "license": "CC0",
+      "file": "02_assets/models_3d/sandal_jepit_swallow.glb",
+      "procedural_fallback": "Sandal jepit hijau-putih khas Indonesia: sol berkontur putih-hijau + tali V hijau dengan toe-post",
+      "scale_hint": "panjang ~0.27m (terlihat raksasa dari POV kecoak)",
+      "cached": false
+    },
+    {
+      "id": "fridge_under_gap",
+      "category": "environment",
+      "source": "procedural_blender",
+      "license": "CC0",
+      "file": "02_assets/models_3d/fridge_under_gap.glb",
+      "procedural_fallback": "Kulkas dapur kosan stylized dengan 4 kaki karet menyisakan celah kolong gelap 5.5cm",
+      "scale_hint": "lebar 0.60m, tinggi 1.45m, celah kolong 0.055m",
+      "cached": false
+    },
+    {
+      "id": "kitchen_cabinet_gap",
+      "category": "environment",
+      "source": "polyhaven_api",
+      "license": "CC0",
+      "file": "02_assets/models_3d/modern_wooden_cabinet/modern_wooden_cabinet_1k.gltf",
+      "procedural_fallback": "Bawah lemari dapur kayu dengan celah gelap setinggi 5cm",
+      "scale_hint": "1 unit = 1 meter",
+      "cached": false
+    },
+    {
+      "id": "human_silhouette_giant",
+      "category": "character_prop",
+      "source": "procedural_blender",
+      "license": "CC0",
+      "file": "02_assets/models_3d/human_silhouette_giant.glb",
+      "procedural_fallback": "Siluet manusia proporsional berkaus oblong & celana pendek dengan rig lengan sandal dan kaki kiri terpisah",
+      "scale_hint": "tinggi ~1.72m",
+      "cached": false
+    },
+    {
+      "id": "cockroach_antennae_rig",
+      "category": "pov_foreground",
+      "source": "procedural_blender",
+      "license": "CC0",
+      "file": "02_assets/models_3d/cockroach_antennae_rig.glb",
+      "procedural_fallback": "Dua antena segmented melengkung + dua sayap transparan kecokelatan parented ke kamera POV",
+      "scale_hint": "skala foreground kamera (0.04m - 0.12m di depan lensa)",
+      "cached": false
+    }
+  ],
+  "textures": [],
+  "hdri": [],
+  "sfx": [
+    {
+      "id": "light_switch_click",
+      "file": "02_assets/sfx/light_switch_click.wav",
+      "desc": "Bunyi cetek saklar lampu dapur",
+      "license": "Public Domain / Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "fluorescent_hum",
+      "file": "02_assets/sfx/fluorescent_hum.wav",
+      "desc": "Dengung lampu neon menyala (50Hz)",
+      "license": "Public Domain / Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "dramatic_boom",
+      "file": "02_assets/sfx/dramatic_boom.wav",
+      "desc": "Dentuman tegang sub-bass saat bahaya muncul",
+      "license": "Public Domain / Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "skitter_fast",
+      "file": "02_assets/sfx/skitter_fast.wav",
+      "desc": "Suara kaki serangga berlari cepat di keramik",
+      "license": "Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "wind_whoosh_heavy",
+      "file": "02_assets/sfx/wind_whoosh_heavy.wav",
+      "desc": "Hembusan angin raksasa dari ayunan sandal",
+      "license": "Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "sandal_slam_thud",
+      "file": "02_assets/sfx/sandal_slam_thud.wav",
+      "desc": "Gebukan keras sandal jepit ke lantai",
+      "license": "Public Domain / Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "wings_buzz_loud",
+      "file": "02_assets/sfx/wings_buzz_loud.wav",
+      "desc": "Suara sayap kecoak mendengung keras",
+      "license": "Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "record_scratch",
+      "file": "02_assets/sfx/record_scratch.wav",
+      "desc": "Stop mendadak untuk momen komedi",
+      "license": "Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "human_scream_cut",
+      "file": "02_assets/sfx/human_scream_cut.wav",
+      "desc": "Teriakan kaget terpotong cepat (perfectly cut scream)",
+      "license": "CC0",
+      "cached": false
+    }
+  ],
+  "bgm": [
+    {
+      "id": "sneaky_night_loop",
+      "file": "02_assets/bgm/sneaky_night_loop.mp3",
+      "mood": "tenang, mengendap-endap",
+      "license": "Procedural CC0",
+      "cached": false
+    },
+    {
+      "id": "intense_chase_synth",
+      "file": "02_assets/bgm/intense_chase_synth.mp3",
+      "mood": "tegang, aksi cepat",
+      "license": "Procedural CC0",
+      "cached": false
+    }
+  ]
+}

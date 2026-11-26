@@ -1,0 +1,925 @@
+#!/usr/bin/env python3
+"""Blender Headless 3D Scene Builder & Cycles GPU Render Engine (channel-micro-pov).
+
+Usage (via Blender Linux headless):
+  blender --background --python 03_pipeline/scripts/build_and_render.py -- \\
+      --spec 04_episodes/ep001_kecoak_dapur/ep001_spec.json \\
+      --mode preview [--scene 4]
+
+Features:
+- Cycles GPU acceleration (auto-detects OptiX -> CUDA on Colab T4, safe CPU fallback)
+  with OpenImageDenoise (OIDN).
+- Reads Audio-First `timing_manifest.json` so every scene's animation matches actual VO duration.
+- Loads cached Poly Haven CC0 textures, HDRI, and GLTF kitchen furniture (`modern_wooden_cabinet`,
+  `cardboard_box_01`, `Shelf_01`, `wooden_bowl_01`).
+- Builds stylized Indonesian props via `procedural_props.py` (Swallow flip-flop, Indomie spill,
+  cockroach antennae/wings foreground rig, rigged giant human silhouette, 5.5cm fridge under-gap).
+- Full 8-scene dynamic POV choreography: neon flash, low-angle boss tilt, cyan bullet-time,
+  300 km/h sprint with camera shake + 112° FOV, foot stomp shadow, whip-pan left/right/up,
+  wobbly wing takeoff, dive toward face + Cut to Black.
+- Renders per-scene MP4 clips (`raw_render/scenes/scene_0X.mp4`) and supports `--scene N`
+  for instant single-scene revision renders.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import bpy
+from mathutils import Euler, Vector
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from pipeline_utils import (
+    check_ffmpeg_available,
+    get_repo_root,
+    load_and_validate_spec,
+    load_json,
+    log,
+    resolve_assets_dir,
+    resolve_episode_work_dir,
+)
+import procedural_props as props
+
+
+# =============================================================================
+# RENDER ENGINE & GPU CONFIGURATION (CYCLES + OPTIX/CUDA + OIDN)
+# =============================================================================
+
+def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None:
+    scene.render.engine = "CYCLES"
+    scene.render.fps = fps
+    scene.render.fps_base = 1.0
+
+    if mode == "preview":
+        scene.render.resolution_x = 540
+        scene.render.resolution_y = 960
+        scene.cycles.samples = 16
+        scene.cycles.adaptive_threshold = 0.06
+        scene.cycles.max_bounces = 4
+        scene.cycles.diffuse_bounces = 2
+        scene.cycles.glossy_bounces = 2
+        scene.cycles.transmission_bounces = 2
+        scene.cycles.transparent_max_bounces = 4
+    else:
+        scene.render.resolution_x = 1080
+        scene.render.resolution_y = 1920
+        scene.cycles.samples = 32
+        scene.cycles.adaptive_threshold = 0.025
+        scene.cycles.max_bounces = 6
+        scene.cycles.diffuse_bounces = 3
+        scene.cycles.glossy_bounces = 3
+        scene.cycles.transmission_bounces = 4
+        scene.cycles.transparent_max_bounces = 6
+
+    scene.render.resolution_percentage = 100
+    scene.cycles.use_adaptive_sampling = True
+    scene.cycles.use_denoising = True
+    scene.cycles.denoiser = "OPENIMAGEDENOISE"
+    if hasattr(scene.cycles, "denoising_input_passes"):
+        scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
+
+    # Motion blur gives 300 km/h sprint and whip-pans cinematic punch!
+    scene.render.use_motion_blur = True
+    scene.render.motion_blur_shutter = 0.35
+
+    # Output crisp PNG frames per scene (robust against Colab disconnects)
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGB"
+    scene.render.image_settings.compression = 15
+
+    # Punchy high-contrast color management
+    try:
+        scene.view_settings.view_transform = "AgX"
+        scene.view_settings.look = "AgX - Medium High Contrast"
+    except Exception:
+        scene.view_settings.view_transform = "Filmic"
+        try:
+            scene.view_settings.look = "Medium High Contrast"
+        except Exception:
+            pass
+    scene.view_settings.exposure = -0.35
+
+    # Detect NVIDIA T4 GPU: try OPTIX first, then CUDA, else CPU
+    device_used = "CPU"
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        for compute_type in ("OPTIX", "CUDA"):
+            try:
+                prefs.compute_device_type = compute_type
+                prefs.get_devices()
+                gpu_devices = [d for d in prefs.devices if d.type == compute_type]
+                if gpu_devices:
+                    for d in prefs.devices:
+                        d.use = d.type == compute_type
+                    scene.cycles.device = "GPU"
+                    device_used = f"GPU ({compute_type}: {gpu_devices[0].name})"
+                    break
+            except Exception:
+                continue
+        if device_used == "CPU":
+            scene.cycles.device = "CPU"
+    except Exception:
+        scene.cycles.device = "CPU"
+
+    log(
+        "BLENDER",
+        f"Cycles configured | Mode: {mode} ({scene.render.resolution_x}x{scene.render.resolution_y}, "
+        f"{scene.cycles.samples} samples, {fps}fps) | Device: {device_used} | OIDN: ON",
+    )
+
+
+# =============================================================================
+# WORLD HDRI & LIGHTING RIG
+# =============================================================================
+
+def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str, Any]:
+    """Configure Poly Haven HDRI world + night moonlight fill + overhead fluorescent neon + cyan accent."""
+    world = bpy.data.worlds.new("MicroPOV_World")
+    scene.world = world
+    world.use_nodes = True
+    nt = world.node_tree
+    nt.nodes.clear()
+
+    out = nt.nodes.new("ShaderNodeOutputWorld")
+    bg = nt.nodes.new("ShaderNodeBackground")
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+
+    hdri_path = assets_dir / "hdri" / "small_empty_room_3_1k.hdr"
+    if not hdri_path.exists():
+        alt = assets_dir / "hdri" / "abandoned_tiled_room_1k.hdr"
+        if alt.exists():
+            hdri_path = alt
+
+    if hdri_path.exists():
+        env = nt.nodes.new("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(str(hdri_path), check_existing=True)
+        # Tint HDRI slightly so night scenes stay moody blue and neon scenes crisp
+        mix = nt.nodes.new("ShaderNodeMix")
+        mix.data_type = "RGBA"
+        mix.blend_type = "MULTIPLY"
+        mix.inputs[0].default_value = 0.65
+        sock_a = next(i for i in mix.inputs if i.name == "A" and i.type == "RGBA")
+        sock_b = next(i for i in mix.inputs if i.name == "B" and i.type == "RGBA")
+        sock_out = next(o for o in mix.outputs if o.name == "Result" and o.type == "RGBA")
+        sock_b.default_value = (0.55, 0.72, 1.0, 1.0)
+        nt.links.new(env.outputs["Color"], sock_a)
+        nt.links.new(sock_out, bg.inputs["Color"])
+        world_tint = sock_b
+        log("BLENDER", f"Loaded cached Poly Haven HDRI: {hdri_path.name}")
+    else:
+        bg.inputs["Color"].default_value = (0.04, 0.08, 0.18, 1.0)
+        world_tint = bg.inputs["Color"]
+
+    bg.inputs["Strength"].default_value = 0.18
+
+    def _add_area_light(name: str, loc, rot, size, size_y, energy, color):
+        ld = bpy.data.lights.new(name=name, type="AREA")
+        ld.shape = "RECTANGLE"
+        ld.size = size
+        ld.size_y = size_y
+        ld.energy = energy
+        ld.color = color
+        lo = bpy.data.objects.new(name, ld)
+        lo.location = loc
+        lo.rotation_euler = rot
+        scene.collection.objects.link(lo)
+        return lo, ld
+
+    # 1. Dim blue 2 AM kitchen moonlight (Scene 1 pre-switch)
+    night_obj, night_data = _add_area_light(
+        "Light_Night_Blue", (0.8, 0.2, 1.8), (math.radians(35), math.radians(25), 0.0), 1.2, 1.2, 14.0, (0.22, 0.45, 1.0)
+    )
+
+    # 2. Blinding white overhead Indonesian TL Fluorescent Neon (flashes ON at Scene 1 t=1.0s!)
+    neon_obj, neon_data = _add_area_light(
+        "Light_Neon_Main", (0.0, 1.55, 2.55), (0.0, 0.0, 0.0), 0.22, 1.25, 0.0, (0.93, 0.97, 1.0)
+    )
+
+    # 3. Dramatic Boss Backlight behind human head (Scene 2 silhouette rim light!)
+    rim_obj, rim_data = _add_area_light(
+        "Light_Boss_Backlight", (0.0, 2.15, 2.15), (math.radians(-42), 0.0, 0.0), 0.9, 0.9, 0.0, (0.90, 0.96, 1.0)
+    )
+
+    # 4. Cyan Cheat-Code Accent Light (Scene 3 bullet time)
+    cyan_data = bpy.data.lights.new(name="Light_Cyan_Accent", type="POINT")
+    cyan_data.energy = 0.0
+    cyan_data.color = (0.05, 0.92, 1.0)
+    cyan_data.shadow_soft_size = 0.15
+    cyan_obj = bpy.data.objects.new("Light_Cyan_Accent", cyan_data)
+    cyan_obj.location = (0.0, 0.60, 0.22)
+    scene.collection.objects.link(cyan_obj)
+
+    # 5. Soft fill bounce near floor so cockroach POV props remain punchy & readable
+    fill_obj, fill_data = _add_area_light(
+        "Light_Floor_Fill", (0.4, -0.4, 0.9), (math.radians(55), 0.0, math.radians(-20)), 0.8, 0.8, 4.0, (0.95, 0.95, 1.0)
+    )
+
+    return {
+        "world_bg": bg,
+        "world_tint": world_tint,
+        "night_light": night_data,
+        "neon_light": neon_data,
+        "rim_light": rim_data,
+        "cyan_light": cyan_data,
+        "fill_light": fill_data,
+    }
+
+
+# =============================================================================
+# IMPORT CACHED POLY HAVEN CC0 GLTF KITCHEN PROPS
+# =============================================================================
+
+def import_gltf_prop(
+    gltf_path: Path,
+    name: str,
+    location: Tuple[float, float, float],
+    rotation_deg: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    scale: float = 1.0,
+) -> Optional[bpy.types.Object]:
+    """Import a cached CC0 .gltf/.glb into an anchor Empty safely."""
+    if not gltf_path.exists():
+        return None
+    before = set(bpy.data.objects)
+    try:
+        bpy.ops.import_scene.gltf(filepath=str(gltf_path))
+    except Exception as exc:
+        log("WARN", f"Could not import GLTF {gltf_path.name}: {exc}")
+        return None
+    imported = [o for o in bpy.data.objects if o not in before]
+    if not imported:
+        return None
+
+    anchor = bpy.data.objects.new(name, None)
+    anchor.location = location
+    anchor.rotation_euler = tuple(math.radians(a) for a in rotation_deg)
+    anchor.scale = (scale, scale, scale)
+    bpy.context.scene.collection.objects.link(anchor)
+
+    for obj in imported:
+        if obj.parent is None:
+            obj.parent = anchor
+    log("BLENDER", f"Placed CC0 GLTF prop {name} ({gltf_path.name})")
+    return anchor
+
+
+def populate_cached_kitchen_furniture(assets_dir: Path) -> None:
+    """Place downloaded Poly Haven CC0 furniture around the kosan kitchen set."""
+    models_dir = assets_dir / "models_3d"
+    # Cardboard box blocking right side near fridge (Scene 6: "kanan buntu/kardus"!)
+    box_gltf = models_dir / "cardboard_box_01" / "cardboard_box_01_1k.gltf"
+    if not import_gltf_prop(box_gltf, "Kardus_DeadEnd_Right", (0.58, 2.48, 0.0), (0.0, 0.0, -18.0), scale=1.05):
+        # Procedural fallback cardboard box if offline
+        box_mat = props.make_material("Mat_Cardboard_Fallback", (0.58, 0.42, 0.24, 1.0), roughness=0.88)
+        props._make_beveled_box("Kardus_DeadEnd_Right", (0.45, 0.42, 0.38), 0.006, box_mat, location=(0.58, 2.48, 0.19))
+
+    # Wooden kitchen cabinet along right wall
+    cab_gltf = models_dir / "modern_wooden_cabinet" / "modern_wooden_cabinet_1k.gltf"
+    import_gltf_prop(cab_gltf, "Kitchen_Cabinet_Right", (1.28, 1.65, 0.0), (0.0, 0.0, -90.0), scale=0.95)
+
+    # Kitchen shelf along left wall behind start
+    shelf_gltf = models_dir / "Shelf_01" / "Shelf_01_1k.gltf"
+    import_gltf_prop(shelf_gltf, "Kitchen_Shelf_Left", (-0.64, 0.95, 0.0), (0.0, 0.0, 90.0), scale=0.85)
+
+    # Bowl prop on floor near spill
+    bowl_gltf = models_dir / "wooden_bowl_01" / "wooden_bowl_01_1k.gltf"
+    import_gltf_prop(bowl_gltf, "Extra_Kitchen_Bowl", (0.52, 0.72, 0.0), (0.0, 0.0, 25.0), scale=0.35)
+
+
+# =============================================================================
+# KEYFRAME HELPERS
+# =============================================================================
+
+def _kf_loc_rot(obj: bpy.types.Object, frame: int, loc=None, rot_deg=None, scale=None) -> None:
+    if loc is not None:
+        obj.location = loc
+        obj.keyframe_insert(data_path="location", frame=frame)
+    if rot_deg is not None:
+        obj.rotation_euler = Euler(tuple(math.radians(a) for a in rot_deg), "XYZ")
+        obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+    if scale is not None:
+        obj.scale = scale
+        obj.keyframe_insert(data_path="scale", frame=frame)
+
+
+def _kf_fov(cam_data: bpy.types.Camera, frame: int, fov_deg: float) -> None:
+    """Convert vertical FOV degrees to focal length (mm) and keyframe animatable `lens`."""
+    cam_data.lens_unit = "MILLIMETERS"
+    sensor_mm = cam_data.sensor_height if cam_data.sensor_fit == "VERTICAL" else cam_data.sensor_width
+    fov_rad = math.radians(max(10.0, min(160.0, fov_deg)))
+    cam_data.lens = (sensor_mm * 0.5) / math.tan(fov_rad * 0.5)
+    cam_data.keyframe_insert(data_path="lens", frame=frame)
+
+
+def _kf_hide(obj: bpy.types.Object, frame: int, hidden: bool) -> None:
+    """Recursively keyframe visibility on an object and all its child meshes."""
+    targets = [obj] + list(obj.children_recursive)
+    for t in targets:
+        t.hide_render = hidden
+        t.hide_viewport = hidden
+        t.keyframe_insert(data_path="hide_render", frame=frame)
+        t.keyframe_insert(data_path="hide_viewport", frame=frame)
+
+
+def _kf_light(light_data: bpy.types.Light, frame: int, energy: float) -> None:
+    light_data.energy = energy
+    light_data.keyframe_insert(data_path="energy", frame=frame)
+
+
+def _set_neon_emission(neon_mat: bpy.types.Material, frame: int, strength: float) -> None:
+    for node in neon_mat.node_tree.nodes:
+        if node.type == "BSDF_PRINCIPLED":
+            if "Emission Strength" in node.inputs:
+                node.inputs["Emission Strength"].default_value = strength
+                node.inputs["Emission Strength"].keyframe_insert(data_path="default_value", frame=frame)
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * max(0.0, min(1.0, t))
+
+
+def _set_antennae_pose(
+    ant_rig: Dict[str, bpy.types.Object],
+    frame: int,
+    pitch_deg: float,
+    spread_deg: float,
+    jitter: float = 0.0,
+) -> None:
+    """Keyframe expressive cockroach antennae rotation."""
+    j1 = jitter * math.sin(frame * 1.9)
+    j2 = jitter * math.cos(frame * 2.3)
+    _kf_loc_rot(ant_rig["ant_l"], frame, rot_deg=(pitch_deg + j1, 0.0, spread_deg + j2))
+    _kf_loc_rot(ant_rig["ant_r"], frame, rot_deg=(pitch_deg - j2, 0.0, -spread_deg - j1))
+
+
+# =============================================================================
+# FULL EP001 8-SCENE AUDIO-FIRST CHOREOGRAPHY
+# =============================================================================
+
+def build_ep001_animation(
+    scene: bpy.types.Scene,
+    spec: Dict[str, Any],
+    manifest: Dict[str, Any],
+    assets_dir: Path,
+) -> Dict[int, Dict[str, Any]]:
+    """Build complete EP001 3D world and keyframe all 8 scenes to exact Audio-First timing."""
+    fps = int(manifest["fps"])
+    pov_cfg = spec["pov_config"]
+    cam_h = float(pov_cfg.get("camera_height_m", 0.015))
+    base_fov = float(pov_cfg.get("base_fov_deg", 95.0))
+
+    # 1. Build environment, lights & cached CC0 furniture
+    env = props.build_kitchen_tile_floor(assets_dir)
+    lights = setup_world_and_lights(scene, assets_dir)
+    populate_cached_kitchen_furniture(assets_dir)
+
+    # 2. Build stylized Indonesian props
+    props.build_indomie_bowl_spill((0.0, 0.22, 0.0))
+    fridge = props.build_fridge_under_gap((-0.12, 2.95, 0.0))
+    human = props.build_human_silhouette_giant((0.02, 1.32, 0.0))
+    sandal = props.build_sandal_jepit_swallow((0.0, 0.0, 0.0))
+    wind = props.build_wind_lines((0.0, 0.65, 0.14))
+    dust = props.build_dust_puff((0.0, 0.45, 0.01))
+
+    # 3. Setup POV Camera + Foreground Cockroach Antennae/Wings + Speed Lines
+    cam_data = bpy.data.cameras.new("MicroPOV_Camera")
+    cam_data.clip_start = 0.005  # Critical for 1.5cm cockroach macro scale!
+    cam_data.clip_end = 40.0
+    cam_data.sensor_fit = "VERTICAL"
+    cam_obj = bpy.data.objects.new("MicroPOV_Camera", cam_data)
+    scene.collection.objects.link(cam_obj)
+    scene.camera = cam_obj
+
+    ant_rig = props.build_cockroach_antennae_rig(cam_obj)
+    speed_rig = props.build_speed_lines_rig(cam_obj)
+
+    # Cut-to-black shutter plane right in front of lens for Scene 8's hard blackout ending
+    black_mat = props.make_material("Mat_CutToBlack", (0.0, 0.0, 0.0, 1.0), roughness=1.0)
+    black_shutter = props._make_beveled_box(
+        "CutToBlack_Shutter",
+        (0.40, 0.40, 0.002),
+        0.0,
+        black_mat,
+        parent=cam_obj,
+        location=(0.0, 0.0, -0.020),
+    )
+
+    # Map scene_id -> timing metadata
+    tmap: Dict[int, Dict[str, Any]] = {int(s["scene_id"]): s for s in manifest["scenes"]}
+
+    # Helper to convert scene-local seconds to absolute frame number
+    def f_at(sid: int, local_sec: float) -> int:
+        s = tmap[sid]
+        return max(s["start_frame"], min(s["end_frame"], s["start_frame"] + int(round(local_sec * fps))))
+
+    def f_frac(sid: int, frac: float) -> int:
+        s = tmap[sid]
+        return s["start_frame"] + int(round(frac * (s["frame_count"] - 1)))
+
+    # Initial visibility state (Frame 1)
+    _kf_hide(wind["root"], 1, True)
+    _kf_hide(dust["root"], 1, True)
+    _kf_hide(speed_rig["root"], 1, True)
+    _kf_hide(ant_rig["wing_l"], 1, True)
+    _kf_hide(ant_rig["wing_r"], 1, True)
+    _kf_hide(black_shutter, 1, True)
+
+    # =========================================================================
+    # SCENE 1: JAM 2 PAGI — Gelap biru -> Flash neon putih -> Antennae kaku!
+    # =========================================================================
+    if 1 in tmap:
+        s1 = tmap[1]
+        f0, f_end = s1["start_frame"], s1["end_frame"]
+        f_flash = f_at(1, 1.05)
+
+        # Low static POV looking slightly down at glowing Indomie kuah spill (also shows human/sandal far silhouette!)
+        _kf_loc_rot(cam_obj, f0, (0.0, -0.02, cam_h), (82.0, 0.0, 0.0))
+        _kf_fov(cam_data, f0, base_fov)
+        _kf_loc_rot(cam_obj, f_flash - 2, (0.0, 0.0, cam_h), (83.0, 0.0, 0.0))
+
+        # Startled jolt upward when blinding neon clicks ON!
+        _kf_loc_rot(cam_obj, f_flash + 4, (0.0, -0.01, cam_h + 0.008), (104.0, 3.0, -2.0))
+        _kf_loc_rot(cam_obj, f_end, (0.0, -0.01, cam_h + 0.006), (108.0, 0.0, 0.0))
+        _kf_fov(cam_data, f_end, base_fov)
+
+        # Lighting: Dim night blue -> sudden neon flash blast!
+        _kf_light(lights["night_light"], f0, 14.0)
+        _kf_light(lights["neon_light"], f0, 0.0)
+        _kf_light(lights["neon_light"], f_flash - 1, 0.0)
+        _set_neon_emission(env["neon_mat"], f0, 0.1)
+        _set_neon_emission(env["neon_mat"], f_flash - 1, 0.1)
+        lights["world_bg"].inputs["Strength"].default_value = 0.16
+        lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f0)
+        lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f_flash - 1)
+
+        # Flash peak + settle to bright stark fluorescent kitchen light
+        _kf_light(lights["night_light"], f_flash + 1, 1.5)
+        _kf_light(lights["neon_light"], f_flash + 1, 260.0)
+        _kf_light(lights["neon_light"], f_flash + 7, 135.0)
+        _set_neon_emission(env["neon_mat"], f_flash + 1, 22.0)
+        lights["world_bg"].inputs["Strength"].default_value = 0.28
+        lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f_flash + 1)
+
+        # Human stands menacingly ahead, sandal held low at start then starts lifting
+        _kf_loc_rot(human["root"], f0, (0.02, 1.32, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["left_leg"], f0, (0.12, 0.0, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (15.0, 0.0, 0.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.28, 1.02, 0.72), (82.0, 10.0, -15.0))
+        _kf_loc_rot(sandal["root"], f_end, (-0.26, 0.96, 1.25), (125.0, 8.0, -10.0))
+
+        # Relaxed swaying antennae -> sudden rigid upright shock!
+        for fr in range(f0, f_flash, 4):
+            _set_antennae_pose(ant_rig, fr, -8.0, 6.0, jitter=4.0)
+        _set_antennae_pose(ant_rig, f_flash + 2, 26.0, -8.0, jitter=1.0)
+        _set_antennae_pose(ant_rig, f_end, 24.0, -6.0, jitter=1.5)
+
+    # =========================================================================
+    # SCENE 2: BOSS TERAKHIR — Low-angle extreme tilt up + stepped punch-in zoom
+    # =========================================================================
+    if 2 in tmap:
+        s2 = tmap[2]
+        f0, f_end = s2["start_frame"], s2["end_frame"]
+        f_mid1 = f_frac(2, 0.35)
+        f_mid2 = f_frac(2, 0.68)
+
+        # Extreme upward tilt from floor staring up at towering human & raised green Swallow sandal!
+        _kf_loc_rot(cam_obj, f0, (0.0, 0.08, cam_h), (126.0, 0.0, 6.0))
+        _kf_fov(cam_data, f0, 92.0)
+
+        # Snappy stepped action-trailer zoom punches toward the raised sandal
+        _kf_loc_rot(cam_obj, f_mid1, (-0.01, 0.12, cam_h), (138.0, -2.5, 10.0))
+        _kf_fov(cam_data, f_mid1, 72.0)
+
+        _kf_loc_rot(cam_obj, f_mid2, (-0.02, 0.14, cam_h), (144.0, 2.0, 12.0))
+        _kf_fov(cam_data, f_mid2, 56.0)
+
+        _kf_loc_rot(cam_obj, f_end, (-0.02, 0.15, cam_h), (146.0, 0.0, 11.0))
+        _kf_fov(cam_data, f_end, 54.0)
+
+        # Backlight boss silhouette glow
+        _kf_light(lights["rim_light"], f0, 420.0)
+        _kf_light(lights["neon_light"], f0, 230.0)
+
+        # Human raises right arm high with Swallow sandal poised overhead!
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (150.0, 0.0, 10.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.26, 0.0, 1.38), (168.0, 0.0, 8.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.24, 0.92, 1.72), (148.0, 12.0, -8.0))
+        _kf_loc_rot(sandal["root"], f_end, (-0.22, 0.88, 1.88), (156.0, 15.0, -6.0))
+
+        for fr in range(f0, f_end + 1, 5):
+            _set_antennae_pose(ant_rig, fr, 22.0, -4.0, jitter=5.0)
+
+    # =========================================================================
+    # SCENE 3: CHEAT CODE AKTIF — Bullet-time slow-mo + glowing cyan wind lines!
+    # =========================================================================
+    if 3 in tmap:
+        s3 = tmap[3]
+        f0, f_end = s3["start_frame"], s3["end_frame"]
+        f_wind_start = f_frac(3, 0.25)
+
+        # Dramatic Dutch-tilt slow-mo staring at sandal beginning its descent
+        _kf_loc_rot(cam_obj, f0, (0.0, 0.16, cam_h), (124.0, 9.0, 6.0))
+        _kf_fov(cam_data, f0, 82.0)
+        _kf_loc_rot(cam_obj, f_end, (0.03, 0.20, cam_h), (118.0, 13.0, 2.0))
+        _kf_fov(cam_data, f_end, 94.0)
+
+        # Cyan accent glow + wind-wave ribbons streaming from sandal down toward camera
+        _kf_light(lights["cyan_light"], f0, 18.0)
+        _kf_light(lights["cyan_light"], f_wind_start, 55.0)
+        _kf_light(lights["cyan_light"], f_end, 65.0)
+        _kf_light(lights["rim_light"], f0, 180.0)
+
+        _kf_hide(wind["root"], f0, False)
+        _kf_loc_rot(wind["root"], f0, (-0.12, 0.78, 0.62), (24.0, 0.0, 8.0), scale=(0.6, 0.6, 0.6))
+        _kf_loc_rot(wind["root"], f_end, (-0.02, 0.36, 0.16), (12.0, 0.0, 2.0), scale=(1.15, 1.35, 1.15))
+
+        # Slow-motion sandal arc descending from overhead toward floor
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (165.0, 0.0, 8.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.26, 0.0, 1.38), (95.0, 0.0, 5.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.20, 0.85, 1.78), (155.0, 12.0, -6.0))
+        _kf_loc_rot(sandal["root"], f_end, (-0.06, 0.50, 0.56), (174.0, 4.0, -3.0))
+
+        for fr in range(f0, f_end + 1, 3):
+            _set_antennae_pose(ant_rig, fr, 14.0, 10.0, jitter=8.5)
+
+    # =========================================================================
+    # SCENE 4: 300 KM/JAM — Sandal slams floor + dust puff + 112° FOV hyper-sprint!
+    # =========================================================================
+    if 4 in tmap:
+        s4 = tmap[4]
+        f0, f_end = s4["start_frame"], s4["end_frame"]
+        f_slam = f_at(4, 0.45)
+
+        # Hide Scene 3 wind lines & cyan light
+        _kf_hide(wind["root"], f0, True)
+        _kf_light(lights["cyan_light"], f0, 0.0)
+        _kf_light(lights["neon_light"], f0, 310.0)
+
+        # Sandal SLAMS hard onto floor right where cockroach was!
+        _kf_loc_rot(sandal["root"], f0, (-0.04, 0.44, 0.45), (176.0, 2.0, 0.0))
+        _kf_loc_rot(sandal["root"], f_slam, (0.0, 0.34, 0.017), (180.0, 0.0, 0.0))
+        _kf_loc_rot(sandal["root"], f_end, (0.0, 0.34, 0.017), (180.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f_slam, (-0.26, 0.0, 1.38), (22.0, 0.0, 0.0))
+
+        # Dust puff bursts outward on sandal slam!
+        _kf_hide(dust["root"], f0, True)
+        _kf_hide(dust["root"], f_slam, False)
+        _kf_loc_rot(dust["root"], f_slam, (0.0, 0.36, 0.015), scale=(0.25, 0.25, 0.25))
+        _kf_loc_rot(dust["root"], min(f_end, f_slam + 14), (0.0, 0.36, 0.025), scale=(2.3, 2.3, 1.5))
+        _kf_hide(dust["root"], min(f_end, f_slam + 22), True)
+
+        # Enable subtle sprint speed-lines around camera edges!
+        _kf_hide(speed_rig["root"], f0, True)
+        _kf_hide(speed_rig["root"], f_slam + 2, False)
+
+        # Widen FOV to 112° and SPRINT past human along tile grout toward fridge!
+        _kf_fov(cam_data, f0, 98.0)
+        _kf_fov(cam_data, f_slam + 5, 112.0)
+        _kf_fov(cam_data, f_end, 112.0)
+
+        # Procedural high-frequency cockroach sprint shake along tile grout lines (y: 0.42 -> 1.92)
+        for fr in range(f0, f_end + 1, 2):
+            u = (fr - f0) / max(1, (f_end - f0))
+            if fr < f_slam:
+                cy = _lerp(0.24, 0.42, (fr - f0) / max(1, f_slam - f0))
+                cx = -0.02
+                shake_r = 1.5
+            else:
+                su = (fr - f_slam) / max(1, (f_end - f_slam))
+                cy = _lerp(0.45, 1.85, su)
+                # Swerve slightly left around human's legs along grout line x ~ -0.14
+                cx = -0.14 * math.sin(min(1.0, su * 1.4) * math.pi * 0.5) + 0.012 * math.sin(fr * 1.6)
+                shake_r = 2.8
+            cz = cam_h + 0.003 * abs(math.sin(fr * 1.8))
+            pitch = 91.5 + 1.4 * math.sin(fr * 2.1)
+            roll = shake_r * math.sin(fr * 1.5)
+            yaw = 2.0 * math.cos(fr * 1.3)
+            _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, yaw))
+            _set_antennae_pose(ant_rig, fr, -14.0, 20.0, jitter=11.0)
+
+        # Human pivots slightly toward fridge after missing
+        _kf_loc_rot(human["root"], f_end, (0.04, 1.75, 0.0), (0.0, 0.0, 170.0))
+
+    # =========================================================================
+    # SCENE 5: TINGGAL SEJENGKAL — Sprint toward dark fridge under-gap -> GIANT FOOT STOMPS!
+    # =========================================================================
+    if 5 in tmap:
+        s5 = tmap[5]
+        f0, f_end = s5["start_frame"], s5["end_frame"]
+        f_stomp_start = f_at(5, max(1.8, s5["scene_duration_sec"] - 1.15))
+        f_stomp_land = f_at(5, max(2.2, s5["scene_duration_sec"] - 0.55))
+
+        _kf_hide(speed_rig["root"], f0, False)
+        _kf_hide(speed_rig["root"], f_stomp_land, True)
+        _kf_fov(cam_data, f0, 106.0)
+        _kf_fov(cam_data, f_end, 96.0)
+
+        # Position human standing right near the fridge gap so left foot stomps straight into path!
+        _kf_loc_rot(human["root"], f0, (0.14, 2.38, 0.0), (0.0, 0.0, 25.0))
+        # Left foot lifted high out of frame, then STOMPS squarely onto x=-0.12, y=2.52 blocking fridge gap!
+        _kf_loc_rot(human["left_leg"], f0, (-0.22, 0.25, 0.42), (-18.0, 0.0, 0.0))
+        _kf_loc_rot(human["left_leg"], f_stomp_start, (-0.22, 0.16, 0.36), (-12.0, 0.0, 0.0))
+        _kf_loc_rot(human["left_leg"], f_stomp_land, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["left_leg"], f_end, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
+
+        # Camera sprints straight toward dark 5.5cm fridge gap (y: 1.85 -> 2.26)
+        for fr in range(f0, f_end + 1, 2):
+            u = (fr - f0) / max(1, (f_end - f0))
+            cy = _lerp(1.86, 2.24, min(1.0, u * 1.05))
+            cx = -0.12 + 0.008 * math.sin(fr * 1.7)
+            cz = cam_h + 0.0025 * abs(math.sin(fr * 2.0))
+            pitch = 88.5 + (6.0 * max(0.0, (fr - f_stomp_start) / max(1, f_end - f_stomp_start)))
+            roll = 1.8 * math.sin(fr * 1.6) if fr < f_stomp_land else 0.5
+            _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, 0.0))
+            _set_antennae_pose(ant_rig, fr, -8.0 if fr < f_stomp_land else 22.0, 14.0, jitter=9.0)
+
+        # Shadow darkens dramatically as foot falls in front of light!
+        _kf_light(lights["neon_light"], f0, 310.0)
+        _kf_light(lights["neon_light"], f_stomp_land, 210.0)
+
+    # =========================================================================
+    # SCENE 6: TERKEPUNG! — Hard brake + Whip-pan Left (wall), Right (box), Up (sandal!)
+    # =========================================================================
+    if 6 in tmap:
+        s6 = tmap[6]
+        f0, f_end = s6["start_frame"], s6["end_frame"]
+        f_brake = f_frac(6, 0.14)
+        f_left_in = f_frac(6, 0.28)
+        f_left_hold = f_frac(6, 0.42)
+        f_right_in = f_frac(6, 0.54)
+        f_right_hold = f_frac(6, 0.68)
+        f_up_in = f_frac(6, 0.80)
+
+        _kf_hide(speed_rig["root"], f0, True)
+        _kf_fov(cam_data, f0, 96.0)
+        _kf_fov(cam_data, f_up_in, 102.0)
+        _kf_light(lights["neon_light"], f0, 330.0)
+
+        # Human foot firmly blocking fridge gap; sandal raised directly overhead again!
+        _kf_loc_rot(human["root"], f0, (0.14, 2.38, 0.0), (0.0, 0.0, 22.0))
+        _kf_loc_rot(human["left_leg"], f0, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (158.0, 0.0, 5.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.10, 2.15, 0.85), (175.0, 8.0, 10.0))
+        _kf_loc_rot(sandal["root"], f_end, (-0.11, 2.12, 0.52), (178.0, 5.0, 6.0))
+
+        # 1. Hard screeching brake facing giant blocking foot
+        _kf_loc_rot(cam_obj, f0, (-0.12, 2.24, cam_h), (95.0, 0.0, 0.0))
+        _kf_loc_rot(cam_obj, f_brake, (-0.12, 2.18, cam_h + 0.004), (98.0, -4.0, 0.0))
+        # 2. Whip-pan LEFT (kosan kitchen wall!)
+        _kf_loc_rot(cam_obj, f_left_in, (-0.12, 2.18, cam_h), (93.0, 5.0, 78.0))
+        _kf_loc_rot(cam_obj, f_left_hold, (-0.12, 2.18, cam_h), (93.0, 3.0, 80.0))
+        # 3. Whip-pan RIGHT (cardboard box / cabinet dead-end!)
+        _kf_loc_rot(cam_obj, f_right_in, (-0.12, 2.18, cam_h), (93.0, -5.0, -76.0))
+        _kf_loc_rot(cam_obj, f_right_hold, (-0.12, 2.18, cam_h), (93.0, -3.0, -74.0))
+        # 4. Whip-pan STRAIGHT UP (giant green Swallow flip-flop ready to crush!)
+        _kf_loc_rot(cam_obj, f_up_in, (-0.12, 2.18, cam_h), (162.0, 4.0, -8.0))
+        _kf_loc_rot(cam_obj, f_end, (-0.12, 2.18, cam_h), (168.0, -3.0, -4.0))
+
+        for fr in range(f0, f_end + 1, 3):
+            _set_antennae_pose(ant_rig, fr, 26.0, 18.0, jitter=14.0)
+
+    # =========================================================================
+    # SCENE 7: MODE TERBANG — Translucent wings snap open + wobbly zig-zag takeoff!
+    # =========================================================================
+    if 7 in tmap:
+        s7 = tmap[7]
+        f0, f_end = s7["start_frame"], s7["end_frame"]
+        f_wings = f_at(7, 1.45)
+
+        # Wings snap open & buzz wildly at screen edges!
+        _kf_hide(ant_rig["wing_l"], f0, True)
+        _kf_hide(ant_rig["wing_r"], f0, True)
+        _kf_hide(ant_rig["wing_l"], f_wings, False)
+        _kf_hide(ant_rig["wing_r"], f_wings, False)
+
+        # Human steps slightly back facing camera so face/chest forms the darkest shadow against ceiling neon
+        _kf_loc_rot(human["root"], f0, (0.04, 2.48, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["left_leg"], f0, (0.12, 0.0, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (110.0, 0.0, 15.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.26, 2.18, 1.38), (115.0, 20.0, -15.0))
+        _kf_light(lights["neon_light"], f0, 420.0)
+        _kf_light(lights["rim_light"], f0, 480.0)
+
+        _kf_fov(cam_data, f0, 98.0)
+        _kf_fov(cam_data, f_wings, 106.0)
+        _kf_fov(cam_data, f_end, 102.0)
+
+        # Wobbly, unsteered zig-zag liftoff from floor (z: 0.015 -> 1.42m)
+        for fr in range(f0, f_end + 1, 2):
+            if fr < f_wings:
+                u0 = (fr - f0) / max(1, f_wings - f0)
+                cx = _lerp(-0.12, -0.05, u0)
+                cy = _lerp(2.14, 1.75, u0)
+                cz = cam_h + 0.015 * u0
+                pitch = _lerp(135.0, 118.0, u0)
+                roll = 4.0 * math.sin(fr * 1.4)
+                yaw = 0.0
+            else:
+                uf = (fr - f_wings) / max(1, f_end - f_wings)
+                cx = -0.05 + 0.24 * math.sin(uf * math.pi * 2.5)
+                cy = _lerp(1.75, 1.25, uf)
+                cz = _lerp(0.04, 1.46, uf ** 1.15)
+                pitch = _lerp(116.0, 96.0, uf) + 5.0 * math.sin(fr * 0.7)
+                roll = 14.0 * math.sin(uf * math.pi * 3.0) + 3.0 * math.cos(fr * 1.8)
+                yaw = -12.0 * math.cos(uf * math.pi * 2.5)
+                # Rapid high-speed wing buzz oscillation
+                flap = 24.0 * math.sin(fr * 2.8)
+                _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(12.0, flap, 18.0))
+                _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(12.0, -flap, -18.0))
+
+            _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, yaw))
+            _set_antennae_pose(ant_rig, fr, 12.0, 22.0, jitter=12.0)
+
+    # =========================================================================
+    # SCENE 8: MAAF YA BANG — Direct dive to horrified face -> drop sandal -> CUT TO BLACK!
+    # =========================================================================
+    if 8 in tmap:
+        s8 = tmap[8]
+        f0, f_end = s8["start_frame"], s8["end_frame"]
+        f_drop = f_frac(8, 0.45)
+        f_black = max(f0 + 1, f_end - int(round(0.25 * fps)))  # Hard Cut-To-Black 0.25s before end!
+
+        _kf_hide(ant_rig["wing_l"], f0, False)
+        _kf_hide(ant_rig["wing_r"], f0, False)
+        _kf_hide(speed_rig["root"], f0, False)
+
+        # Human stands directly ahead (y=2.48, face at z=1.66, y=2.36)
+        _kf_loc_rot(human["root"], f0, (0.0, 2.48, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["head"], f0, (0.0, 0.0, 1.48), (-8.0, 0.0, 0.0))
+        _kf_loc_rot(human["head"], f_black, (0.0, 0.02, 1.48), (12.0, 0.0, 0.0))
+
+        # Eyes widen in sheer terror & mouth drops open!
+        _kf_loc_rot(human["eye_l"], f0, scale=(1.0, 1.0, 1.0))
+        _kf_loc_rot(human["eye_r"], f0, scale=(1.0, 1.0, 1.0))
+        _kf_loc_rot(human["eye_l"], f_drop, scale=(1.55, 1.2, 1.55))
+        _kf_loc_rot(human["eye_r"], f_drop, scale=(1.55, 1.2, 1.55))
+        _kf_loc_rot(human["mouth"], f0, scale=(1.0, 1.0, 1.0))
+        _kf_loc_rot(human["mouth"], f_drop, scale=(1.35, 1.0, 3.8))
+
+        # Human drops green-white Swallow flip-flop tumbling away in panic!
+        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (95.0, 0.0, 12.0))
+        _kf_loc_rot(human["right_arm"], f_drop + 10, (-0.26, 0.0, 1.38), (135.0, -35.0, 45.0))
+        _kf_loc_rot(sandal["root"], f0, (-0.26, 2.18, 1.42), (110.0, 15.0, -15.0))
+        _kf_loc_rot(sandal["root"], f_drop, (-0.30, 2.12, 1.36), (135.0, 35.0, -25.0))
+        _kf_loc_rot(sandal["root"], f_black, (-0.42, 2.02, 0.18), (340.0, 190.0, 85.0))
+
+        # Camera locks on and rockets straight into human's horrified face!
+        _kf_fov(cam_data, f0, 96.0)
+        _kf_fov(cam_data, f_black, 108.0)
+
+        for fr in range(f0, f_black + 1, 2):
+            u = (fr - f0) / max(1, (f_black - f0))
+            ease = u ** 1.45
+            cx = _lerp(0.05, 0.0, ease) + 0.014 * (1.0 - u) * math.sin(fr * 1.9)
+            cy = _lerp(1.25, 2.24, ease)
+            cz = _lerp(1.48, 1.65, ease) + 0.010 * (1.0 - u) * math.cos(fr * 2.1)
+            pitch = _lerp(96.0, 91.0, ease)
+            roll = 4.5 * math.sin(fr * 2.2) * (1.0 - 0.5 * u)
+            _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, 0.0))
+            _set_antennae_pose(ant_rig, fr, -10.0, 24.0, jitter=15.0)
+            flap = 28.0 * math.sin(fr * 3.1)
+            _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(14.0, flap, 22.0))
+            _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(14.0, -flap, -22.0))
+
+        # HARD CUT TO BLACK 0.25s before impact!
+        _kf_hide(black_shutter, f_black - 1, True)
+        _kf_hide(black_shutter, f_black, False)
+        _kf_hide(black_shutter, f_end, False)
+
+    scene.frame_start = 1
+    scene.frame_end = int(manifest["total_frames"])
+    return tmap
+
+
+# =============================================================================
+# PER-SCENE RENDER + MP4 ENCODING
+# =============================================================================
+
+def render_scene_clip(
+    scene: bpy.types.Scene,
+    scene_meta: Dict[str, Any],
+    scenes_out_dir: Path,
+    ffmpeg_bin: str,
+    fps: int,
+) -> Path:
+    sid = int(scene_meta["scene_id"])
+    f_start = int(scene_meta["start_frame"])
+    f_end = int(scene_meta["end_frame"])
+
+    frames_dir = scenes_out_dir / f"scene_{sid:02d}_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    # Clean stale PNGs if re-rendering this scene
+    for old_png in frames_dir.glob("frame_*.png"):
+        old_png.unlink(missing_ok=True)
+
+    scene.frame_start = f_start
+    scene.frame_end = f_end
+    scene.render.filepath = str(frames_dir / "frame_")
+
+    log("RENDER", f"Rendering Scene {sid:02d} | Frames {f_start}..{f_end} ({f_end - f_start + 1} frames)...")
+    bpy.ops.render.render(animation=True)
+
+    out_mp4 = scenes_out_dir / f"scene_{sid:02d}.mp4"
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-framerate",
+        str(fps),
+        "-start_number",
+        str(f_start),
+        "-i",
+        str(frames_dir / "frame_%04d.png"),
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "18",
+        "-preset",
+        "fast",
+        str(out_mp4),
+    ]
+    subprocess.run(cmd, check=True)
+    log("RENDER", f"Scene {sid:02d} MP4 ready -> {out_mp4}")
+    return out_mp4
+
+
+def parse_args() -> argparse.Namespace:
+    argv = sys.argv
+    extra = argv[argv.index("--") + 1 :] if "--" in argv else []
+    parser = argparse.ArgumentParser(description="Blender Headless 3D Micro-POV Builder & Renderer")
+    parser.add_argument(
+        "--spec",
+        type=str,
+        default=str(get_repo_root() / "04_episodes/ep001_kecoak_dapur/ep001_spec.json"),
+    )
+    parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
+    parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets cache directory")
+    parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
+    parser.add_argument("--mode", choices=["preview", "final"], default="preview")
+    parser.add_argument(
+        "--scene",
+        type=int,
+        default=None,
+        help="Render ONLY a single scene_id (for fast partial revision)",
+    )
+    parser.add_argument("--save-blend", action="store_true", help="Save assembled .blend file before rendering")
+    parser.add_argument("--no-render", action="store_true", help="Build .blend scene only without rendering frames")
+    return parser.parse_args(extra)
+
+
+def main() -> int:
+    args = parse_args()
+    ffmpeg_bin = check_ffmpeg_available()
+
+    spec_path = Path(args.spec).resolve()
+    spec = load_and_validate_spec(spec_path)
+    assets_dir = resolve_assets_dir(args.assets_dir)
+    work_dir = resolve_episode_work_dir(spec_path, args.work_dir)
+    timing_path = Path(args.timing).resolve() if args.timing else (work_dir / "timing_manifest.json")
+
+    if not timing_path.exists():
+        log("ERROR", f"timing_manifest.json not found at {timing_path}. Run generate_tts.py first (Audio-First!).")
+        return 1
+    manifest = load_json(timing_path)
+    fps = int(manifest.get("fps", 30))
+
+    # Start from a completely clean Blender scene
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    configure_cycles_render(scene, args.mode, fps)
+
+    tmap = build_ep001_animation(scene, spec, manifest, assets_dir)
+
+    if args.save_blend or args.no_render:
+        blend_path = work_dir / f"{spec['episode_id'].lower()}_{args.mode}.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
+        log("BLENDER", f"Saved Blender project -> {blend_path}")
+
+    if args.no_render:
+        log("BLENDER", "--no-render active; scene assembly verified cleanly.")
+        return 0
+
+    scenes_out_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
+    scenes_out_dir.mkdir(parents=True, exist_ok=True)
+
+    target_ids = [args.scene] if args.scene is not None else sorted(tmap.keys())
+    for sid in target_ids:
+        if sid not in tmap:
+            log("ERROR", f"Scene {sid} not found in timing_manifest.json (available: {sorted(tmap.keys())})")
+            return 1
+        render_scene_clip(scene, tmap[sid], scenes_out_dir, ffmpeg_bin, fps)
+
+    log("RENDER", f"Completed rendering {len(target_ids)} scene(s) in mode '{args.mode}'.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
