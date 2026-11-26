@@ -128,12 +128,31 @@ def _stylize_chunk_words(chunk: str, chunk_idx: int) -> str:
     return " ".join(styled)
 
 
+def _resolve_vo_wav(scene: Dict[str, Any], work_dir: Optional[Path] = None) -> Optional[Path]:
+    """Resolve VO WAV path cleanly even when timing_manifest.json was generated on a different machine (e.g. Kaggle bundle!)."""
+    raw = scene.get("wav_path")
+    if raw:
+        p = Path(str(raw))
+        if p.exists():
+            return p
+        if work_dir is not None:
+            alt = work_dir / "raw_render" / "vo" / p.name
+            if alt.exists():
+                return alt
+    if work_dir is not None and "scene_id" in scene:
+        cand = work_dir / "raw_render" / "vo" / f"scene_{int(scene['scene_id']):02d}.wav"
+        if cand.exists():
+            return cand
+    return Path(str(raw)) if raw else None
+
+
 def generate_ass_subtitles(
     manifest: Dict[str, Any],
     out_ass: Path,
     width: int = 1080,
     height: int = 1920,
     use_whisper: bool = True,
+    work_dir: Optional[Path] = None,
 ) -> Path:
     """Create stylized 1080x1920 ASS subtitle file using `faster-whisper` word timestamps (with safe fallback)."""
     header = f"""[Script Info]
@@ -165,7 +184,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         s_end = float(scene["end_sec"])
         vo_text = scene.get("vo_text", "").strip()
         badge = scene.get("on_screen_text", "").strip()
-        wav_path = Path(scene["wav_path"]) if scene.get("wav_path") else None
+        wav_path = _resolve_vo_wav(scene, work_dir=work_dir)
 
         if badge:
             b_end = min(s_end - 0.10, s_start + 1.65)
@@ -178,10 +197,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not vo_text:
             continue
 
-        # Prefer millisecond-accurate faster-whisper word timestamps when WAV exists!
+        # Prefer millisecond-accurate faster-whisper word timestamps scaled by 1/VO_SPEED when WAV exists!
         timed_chunks = None
         if use_whisper and wav_path and wav_path.exists():
-            timed_words = extract_word_timestamps(wav_path, vo_text, vo_speed=vo_speed)
+            timed_words = extract_word_timestamps(
+                wav_path,
+                vo_text,
+                vo_speed=vo_speed,
+                expected_dur_sec=vo_dur,
+            )
             if timed_words:
                 timed_chunks = group_timed_words_into_chunks(timed_words, max_words=3, max_chars=18)
                 whisper_scenes += 1
@@ -321,6 +345,7 @@ def mix_audio_and_compose(
     assets_dir: Path,
     output_mp4: Path,
     ffmpeg_bin: str,
+    work_dir: Optional[Path] = None,
 ) -> Path:
     """Mix VO (-6 dB) + SFX (-10 dB) + auto-ducked BGM (-22 dB) + -14 LUFS + burn ASS subtitles."""
     total_dur = float(manifest["total_duration_sec"])
@@ -334,9 +359,9 @@ def mix_audio_and_compose(
     # 1. VO TRACK (each scene WAV placed at start_sec + vo_delay_sec, with 15ms micro-fade & optional atempo)
     vo_labels: List[str] = []
     for s in manifest["scenes"]:
-        wav = Path(s["wav_path"])
-        if not wav.exists():
-            raise FileNotFoundError(f"VO WAV missing: {wav}")
+        wav = _resolve_vo_wav(s, work_dir=work_dir)
+        if not wav or not wav.exists():
+            raise FileNotFoundError(f"VO WAV missing: {wav or s.get('wav_path')}")
         inputs.extend(["-i", str(wav)])
         vo_delay = float(s.get("vo_delay_sec", 0.0))
         vo_speed = float(s.get("vo_speed", manifest.get("vo_speed", 1.0)))
@@ -620,7 +645,14 @@ def main() -> int:
 
     w, h = probe_video_resolution(concat_mp4)
     ass_path = work_dir / f"subtitles_{args.mode}.ass"
-    generate_ass_subtitles(manifest, ass_path, width=w, height=h, use_whisper=not args.no_whisper)
+    generate_ass_subtitles(
+        manifest,
+        ass_path,
+        width=w,
+        height=h,
+        use_whisper=not args.no_whisper,
+        work_dir=work_dir,
+    )
 
     ep_slug = spec["episode_id"].lower()
     if args.mode == "final":
@@ -633,7 +665,16 @@ def main() -> int:
         default_out_name = f"preview_{ep_slug}.mp4"
     output_mp4 = Path(args.output).resolve() if args.output else (work_dir / default_out_name)
 
-    mix_audio_and_compose(spec, manifest, concat_mp4, ass_path, assets_dir, output_mp4, ffmpeg_bin)
+    mix_audio_and_compose(
+        spec,
+        manifest,
+        concat_mp4,
+        ass_path,
+        assets_dir,
+        output_mp4,
+        ffmpeg_bin,
+        work_dir=work_dir,
+    )
     return 0
 
 

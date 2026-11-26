@@ -50,18 +50,57 @@ def _get_whisper_model(model_size: str = "small"):
     return model
 
 
+def _probe_wav_duration_sec(wav_path: Path) -> Optional[float]:
+    try:
+        with wave.open(str(wav_path), "rb") as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            if rate > 0:
+                return float(frames) / float(rate)
+    except Exception:
+        pass
+    return None
+
+
+def _load_wav_mono_16k_float32(wav_path: Path) -> np.ndarray:
+    """Read PCM WAV directly into a 16kHz mono float32 array (100% immune to PyAV version mismatches!)."""
+    with wave.open(str(wav_path), "rb") as wf:
+        nch = wf.getnchannels()
+        sw = wf.getsampwidth()
+        sr = wf.getframerate()
+        raw = wf.readframes(wf.getnframes())
+    if sw == 2:
+        data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    elif sw == 4:
+        data = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+    elif sw == 1:
+        data = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+    else:
+        raise ValueError(f"Unsupported WAV sample width: {sw}")
+    if nch > 1:
+        data = data.reshape(-1, nch).mean(axis=1)
+    if sr != 16000 and len(data) > 1:
+        target_len = max(1, int(round(len(data) * 16000.0 / float(sr))))
+        x_old = np.linspace(0.0, 1.0, len(data), endpoint=False)
+        x_new = np.linspace(0.0, 1.0, target_len, endpoint=False)
+        data = np.interp(x_new, x_old, data).astype(np.float32)
+    return np.ascontiguousarray(data, dtype=np.float32)
+
+
 def extract_word_timestamps(
     wav_path: Path,
     vo_text: str,
     vo_speed: float = 1.0,
+    expected_dur_sec: Optional[float] = None,
     language: str = "id",
     model_size: str = "small",
     use_cache: bool = True,
 ) -> Optional[List[Dict[str, Any]]]:
     """Extract millisecond word timestamps from a scene WAV using `faster-whisper`.
 
-    Returns a list of `{word, start, end}` adjusted for `vo_speed` (playback rate via `atempo`),
-    or `None` if `faster-whisper` is unavailable (caller falls back to weighted chunking).
+    Automatically verifies raw WAV duration vs `expected_dur_sec` and scales timestamps by
+    `1 / vo_speed` when FFmpeg applies `atempo=vo_speed` (e.g. `VO_SPEED = 1.08`), ensuring
+    zero drift between kinetic karaoke subtitles and tempo-adjusted voiceover!
     """
     cache_path = wav_path.with_suffix(".words.json")
     raw_words: Optional[List[Dict[str, Any]]] = None
@@ -77,8 +116,9 @@ def extract_word_timestamps(
     if raw_words is None:
         try:
             model = _get_whisper_model(model_size=model_size)
+            audio_16k = _load_wav_mono_16k_float32(wav_path)
             segments, _ = model.transcribe(
-                str(wav_path),
+                audio_16k,
                 language=language,
                 word_timestamps=True,
                 vad_filter=True,
@@ -109,19 +149,27 @@ def extract_word_timestamps(
     if not raw_words:
         return None
 
+    # Determine effective speed divisor: raw 1.0x WAV + FFmpeg atempo=vo_speed -> divide by vo_speed (1/VO_SPEED)!
     spd = max(0.5, float(vo_speed))
+    raw_dur = _probe_wav_duration_sec(wav_path)
+    if raw_dur and expected_dur_sec and abs(spd - 1.0) > 1e-3:
+        err_scaled = abs((raw_dur / spd) - expected_dur_sec)
+        err_unscaled = abs(raw_dur - expected_dur_sec)
+        if err_unscaled + 0.08 < err_scaled:
+            # WAV is already tempo-adjusted on disk; do not double-scale!
+            spd = 1.0
+
     # Map clean script words onto Whisper word timestamps so spelling & punctuation match 100%!
     script_words = [w for w in re.split(r"\s+", vo_text.replace("—", " — ").strip()) if w and w != "—"]
     adjusted: List[Dict[str, Any]] = []
     if len(script_words) == len(raw_words):
         for sw, rw in zip(script_words, raw_words):
-            adjusted.append(
-                {
-                    "word": sw,
-                    "start": float(rw["start"]) / spd,
-                    "end": float(rw["end"]) / spd,
-                }
-            )
+            t0 = float(rw["start"]) / spd
+            t1 = float(rw["end"]) / spd
+            if expected_dur_sec:
+                t0 = min(t0, max(0.0, expected_dur_sec - 0.06))
+                t1 = min(t1, expected_dur_sec)
+            adjusted.append({"word": sw, "start": round(t0, 4), "end": round(max(t0 + 0.05, t1), 4)})
     else:
         # Proportional index alignment preserves exact Whisper speech pauses while keeping clean script text!
         n_s = max(1, len(script_words))
@@ -131,7 +179,10 @@ def extract_word_timestamps(
             r_idx1 = min(n_r - 1, max(r_idx0, int(math.floor((i + 1) * n_r / n_s)) - 1))
             t0 = float(raw_words[r_idx0]["start"]) / spd
             t1 = float(raw_words[r_idx1]["end"]) / spd
-            adjusted.append({"word": sw, "start": t0, "end": max(t0 + 0.06, t1)})
+            if expected_dur_sec:
+                t0 = min(t0, max(0.0, expected_dur_sec - 0.06))
+                t1 = min(t1, expected_dur_sec)
+            adjusted.append({"word": sw, "start": round(t0, 4), "end": round(max(t0 + 0.05, t1), 4)})
     return adjusted
 
 

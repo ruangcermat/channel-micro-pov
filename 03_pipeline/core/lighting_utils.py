@@ -130,22 +130,30 @@ def configure_render_engine(
                 f"EEVEE headless without GPU/EGL — auto-fallback to Cycles low-sample ({cyc_samples} samples) + OIDN.",
             )
 
+    # Motion blur ON for all GPU video renders and all preview/final renders (shutter=0.40);
+    # skipped only on CPU-only motion_check fallback to avoid 2-3x slower per-frame mesh deformation BVH rebuilds.
+    scene.render.use_motion_blur = (mode != "storyboard") and (has_gpu or mode != "motion_check")
+    scene.render.motion_blur_shutter = 0.40
+
     scene.render.engine = "CYCLES"
     scene.render.use_persistent_data = True
     scene.cycles.device = "GPU" if has_gpu else "CPU"
     scene.cycles.samples = cyc_samples
     scene.cycles.use_adaptive_sampling = True
     scene.cycles.adaptive_threshold = 0.12 if mode == "storyboard" else (0.10 if mode == "motion_check" else 0.06)
-    scene.cycles.max_bounces = max_bounces
-    scene.cycles.diffuse_bounces = 2 if max_bounces >= 3 else 1
-    scene.cycles.glossy_bounces = 2 if max_bounces >= 3 else 1
-    scene.cycles.transmission_bounces = 2 if max_bounces >= 3 else 1
-    scene.cycles.transparent_max_bounces = 6
+    eff_bounces = 1 if (mode == "motion_check" and not has_gpu) else max_bounces
+    scene.cycles.max_bounces = eff_bounces
+    scene.cycles.diffuse_bounces = 2 if eff_bounces >= 3 else 1
+    scene.cycles.glossy_bounces = 2 if eff_bounces >= 3 else 1
+    scene.cycles.transmission_bounces = 2 if eff_bounces >= 3 else 1
+    scene.cycles.transparent_max_bounces = 4 if (mode == "motion_check" and not has_gpu) else 6
     scene.cycles.use_denoising = True
     # Always OpenImageDenoise (Kaggle/Colab T4 driver fails with OptiX denoiser!)
     scene.cycles.denoiser = "OPENIMAGEDENOISE"
     if hasattr(scene.cycles, "denoising_input_passes"):
-        scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL" if mode != "storyboard" else "RGB_ALBEDO"
+        scene.cycles.denoising_input_passes = (
+            "RGB_ALBEDO" if (mode == "storyboard" or (mode == "motion_check" and not has_gpu)) else "RGB_ALBEDO_NORMAL"
+        )
     try:
         scene.cycles.denoising_use_gpu = has_gpu
     except Exception:

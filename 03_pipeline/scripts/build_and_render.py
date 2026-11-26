@@ -214,6 +214,19 @@ def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: 
     return _time.monotonic() - t0
 
 
+def _compute_scene_frames(f_start: int, f_end: int, frame_step: int = 1, max_frames: int = 0) -> List[int]:
+    """Compute exact sorted list of frames to render for a scene."""
+    step = max(1, int(frame_step))
+    frames = list(range(f_start, f_end + 1, step))
+    if not frames:
+        frames = [f_start]
+    if max_frames > 0:
+        frames = frames[:max_frames]
+    elif step > 1 and frames[-1] != f_end:
+        frames.append(f_end)
+    return frames
+
+
 def render_scene_clip(
     scene: bpy.types.Scene,
     scene_meta: Dict[str, Any],
@@ -221,52 +234,105 @@ def render_scene_clip(
     ffmpeg_bin: str,
     fps: int,
     apply_post: bool = True,
+    frame_step: int = 1,
+    max_frames: int = 0,
 ) -> Path:
     sid = int(scene_meta["scene_id"])
     f_start = int(scene_meta["start_frame"])
     f_end = int(scene_meta["end_frame"])
     total_scene_frames = f_end - f_start + 1
+    target_frames = _compute_scene_frames(f_start, f_end, frame_step=frame_step, max_frames=max_frames)
 
     frames_dir = scenes_out_dir / f"scene_{sid:02d}_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     skipped = 0
     rendered = 0
-    log("RENDER", f"Scene {sid:02d} | Frames {f_start}..{f_end} ({total_scene_frames} frames, auto-resume >10KB, post={apply_post})")
+    step_tag = f", step={frame_step}" if frame_step > 1 else ""
+    max_tag = f", max_frames={max_frames}" if max_frames > 0 else ""
+    log(
+        "RENDER",
+        f"Scene {sid:02d} | Frames {f_start}..{f_end} ({len(target_frames)}/{total_scene_frames} frames{step_tag}{max_tag}, "
+        f"auto-resume >10KB, post={apply_post})",
+    )
 
-    for fr in range(f_start, f_end + 1):
+    for idx, fr in enumerate(target_frames):
         frame_file = frames_dir / f"frame_{fr:04d}.png"
         if frame_file.exists() and frame_file.stat().st_size > 10_240:
             skipped += 1
             continue
         dt = _render_single_frame_resilient(scene, fr, frame_file, apply_post=apply_post)
         rendered += 1
-        if rendered == 1 or rendered % 24 == 0 or fr == f_end:
-            rem = max(0, f_end - fr)
-            log("RENDER", f"FRAME {fr}/{f_end} (Scene {sid:02d}) {dt:.1f}s | est. scene rem ~{rem * dt:.0f}s")
+        if rendered == 1 or rendered % 12 == 0 or idx == len(target_frames) - 1:
+            rem = max(0, len(target_frames) - 1 - idx)
+            log("RENDER", f"FRAME {fr}/{f_end} (Scene {sid:02d}, {idx + 1}/{len(target_frames)}) {dt:.1f}s | est. scene rem ~{rem * dt:.0f}s")
 
     log("RENDER", f"Scene {sid:02d} frames ready (rendered={rendered}, resumed/skipped={skipped})")
 
     out_mp4 = scenes_out_dir / f"scene_{sid:02d}.mp4"
-    cmd = [
-        ffmpeg_bin,
-        "-y",
-        "-framerate",
-        str(fps),
-        "-start_number",
-        str(f_start),
-        "-i",
-        str(frames_dir / "frame_%04d.png"),
-        "-c:v",
-        "libx264",
-        "-pix_fmt",
-        "yuv420p",
-        "-crf",
-        "18",
-        "-preset",
-        "fast",
-        str(out_mp4),
-    ]
+    if frame_step == 1 and max_frames == 0:
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-framerate",
+            str(fps),
+            "-start_number",
+            str(f_start),
+            "-i",
+            str(frames_dir / "frame_%04d.png"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "18",
+            "-preset",
+            "fast",
+            str(out_mp4),
+        ]
+    else:
+        # Exact-duration stepped playblast or smoke-test MP4 encoded smoothly at native 24fps!
+        concat_txt = frames_dir / "frames_concat.txt"
+        lines: List[str] = []
+        for idx, fr in enumerate(target_frames):
+            png_path = (frames_dir / f"frame_{fr:04d}.png").resolve()
+            safe_p = str(png_path).replace("'", "'\\''")
+            if idx + 1 < len(target_frames):
+                span = max(1, target_frames[idx + 1] - fr)
+            else:
+                span = max(1, (f_end - fr + 1) if max_frames == 0 else 1)
+            dur = span / float(fps)
+            lines.append(f"file '{safe_p}'")
+            lines.append(f"duration {dur:.6f}")
+        # FFmpeg concat demuxer quirk: repeat last file entry so final duration is respected!
+        last_safe = str((frames_dir / f"frame_{target_frames[-1]:04d}.png").resolve()).replace("'", "'\\''")
+        lines.append(f"file '{last_safe}'")
+        concat_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        exact_dur = (total_scene_frames if max_frames == 0 else len(target_frames)) / float(fps)
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_txt),
+            "-r",
+            str(fps),
+            "-t",
+            f"{exact_dur:.6f}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "18",
+            "-preset",
+            "fast",
+            str(out_mp4),
+        ]
     subprocess.run(cmd, check=True)
     log("RENDER", f"Scene {sid:02d} MP4 ready -> {out_mp4}")
     return out_mp4
@@ -446,6 +512,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-post", action="store_true", help="Disable post.py camera look pass")
     parser.add_argument("--no-render", action="store_true", help="Build & QC .blend scene only without rendering")
     parser.add_argument("--build-mas-dimas", action="store_true", help="Rebuild mas_dimas_ready.blend & front check PNG")
+    parser.add_argument(
+        "--frame-step",
+        type=int,
+        default=1,
+        help="Render every K-th frame (default 1 = full 24fps on GPU; >1 for fast CPU stepped playblast held at 24fps)",
+    )
+    parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=0,
+        help="Limit rendered frames per scene (0 = all; e.g. 2 for 2-frame final smoke test)",
+    )
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=0,
+        help="Optional Cycles sample override (0 = use mode preset: 4 storyboard, 8 motion_check, 16 preview, 24 final)",
+    )
     return parser.parse_args(extra)
 
 
@@ -490,18 +574,48 @@ def main() -> int:
     human = mh.load_mpfb2_human_base(mas_dimas_blend, target_height_m=1.68)
     scene = bpy.context.scene
     lgt_lib.configure_render_engine(scene, args.engine, args.mode, fps, log_fn=log)
+    if args.samples and args.samples > 0 and scene.render.engine == "CYCLES":
+        scene.cycles.samples = int(args.samples)
+        log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
 
-    # Gate 1 fast storyboard baking: bake ONLY hero frames (NEVER full 24fps bake!)
+    # Narrow baked frames cleanly for storyboard, single-scene, stepped playblast, or 2-frame smoke tests!
     bake_frames: Optional[List[int]] = None
+    frame_step = max(1, int(args.frame_step))
+    max_frames = max(0, int(args.max_frames))
     if args.mode == "storyboard" and not args.bake_all and not args.save_blend:
         if hasattr(ep_builder, "get_storyboard_extra_frames"):
             bake_frames = ep_builder.get_storyboard_extra_frames(manifest, fps)
         else:
             bake_frames = [1] + [ep_builder.pick_storyboard_frame(s, fps) for s in manifest["scenes"]]
-    elif args.scene is not None and not args.bake_all and not args.save_blend:
-        s_target = next((s for s in manifest["scenes"] if int(s["scene_id"]) == args.scene), None)
-        if s_target:
-            bake_frames = list(range(int(s_target["start_frame"]), int(s_target["end_frame"]) + 1))
+    elif not args.bake_all and not args.save_blend and (args.scene is not None or frame_step > 1 or max_frames > 0):
+        chosen_scenes = (
+            [s for s in manifest["scenes"] if int(s["scene_id"]) == args.scene]
+            if args.scene is not None
+            else manifest["scenes"]
+        )
+        bf_set = set()
+        for s in chosen_scenes:
+            sf = _compute_scene_frames(
+                int(s["start_frame"]),
+                int(s["end_frame"]),
+                frame_step=frame_step,
+                max_frames=max_frames,
+            )
+            for fr in sf:
+                bf_set.add(fr)
+                # Bake neighbor frames +/- 1 when motion blur is active so shutter interpolation is smooth!
+                if scene.render.use_motion_blur:
+                    if fr > int(s["start_frame"]):
+                        bf_set.add(fr - 1)
+                    if fr < int(s["end_frame"]):
+                        bf_set.add(fr + 1)
+        # Also include storyboard hero frames for QC raycast accuracy
+        if hasattr(ep_builder, "pick_storyboard_frame"):
+            for s in manifest["scenes"]:
+                bf_set.add(ep_builder.pick_storyboard_frame(s, fps))
+        if hasattr(ep_builder, "pick_scene01a_frame") and manifest["scenes"]:
+            bf_set.add(ep_builder.pick_scene01a_frame(manifest["scenes"][0], fps))
+        bake_frames = sorted(bf_set)
 
     build_info = ep_builder.build_episode_scene(
         scene,
@@ -542,7 +656,16 @@ def main() -> int:
         if args.mode == "storyboard":
             render_storyboard_keyframe(scene, tmap[sid], scenes_out_dir, ep_builder, ffmpeg_bin, fps, apply_post=apply_post)
         else:
-            render_scene_clip(scene, tmap[sid], scenes_out_dir, ffmpeg_bin, fps, apply_post=apply_post)
+            render_scene_clip(
+                scene,
+                tmap[sid],
+                scenes_out_dir,
+                ffmpeg_bin,
+                fps,
+                apply_post=apply_post,
+                frame_step=frame_step,
+                max_frames=max_frames,
+            )
 
     if args.mode == "storyboard":
         grid_ids = sorted(tmap.keys()) if len(target_ids) > 1 or args.scene is None else target_ids
