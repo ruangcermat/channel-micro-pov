@@ -5,6 +5,54 @@
   "title": "POV Kamu Jadi Kecoak di Dapur Jam 2 Pagi",
   "universe": "Semesta Kosan",
   "target_duration_sec": 44,
+  "ending_type": "hard_cut_punchline",
+  "silent_readability": {
+    "mute_test_passed": true,
+    "hook_visual_clue": "0.0-1.0s: siluet bayangan kecoak 6 kaki di atas lantai + specular genangan kuah Indomie + Mas Dimas keluar dari pintu kamar kanan yang sedikit terbuka menuju saklar samping kanan kulkas",
+    "notes": "Tanpa suara pun penonton langsung paham POV kecoak dapur jam 02:00 (jam dinding jelas 02:00) yang kepergok Mas Dimas."
+  },
+  "spatial_plan": {
+    "entry_point": "Pintu kamar kosan kayu di dinding kanan (x=1.62, y=2.00..2.86), terbuka ~32 derajat dengan cahaya kamar hangat 2700K keluar",
+    "destination": "Saklar lampu Broco pada dinding belakang tepat di sebelah kanan kulkas (x=0.56, y=3.535, z=1.24)",
+    "fixed_landmarks": [
+      "Jam dinding Poly Haven diset ketat ke 02:00 (x=1.06, y=3.50, z=2.08)",
+      "Kulkas kosan + celah kolong 5,5 cm (x=-0.14, y=2.95)",
+      "Rak dapur kiri penuh 14 properti Poly Haven CC0 (x=-1.06, y=1.15)",
+      "Genangan kuah Indomie + mie + cabai (x=0.0, y=0.22)"
+    ]
+  },
+  "prop_state_chain": [
+    {
+      "prop_id": "sandal_left",
+      "states": [
+        {
+          "scenes": "01A-08",
+          "state": "Dipakai utuh menempel di kaki kiri Mas Dimas di atas lantai keramik (z >= +0.001m, lift foot.L +0.018m)",
+          "parent_bone": "foot.L"
+        }
+      ]
+    },
+    {
+      "prop_id": "sandal_right",
+      "states": [
+        {
+          "scenes": "01A-01B",
+          "state": "Dipakai di kaki kanan Mas Dimas saat keluar kamar & menekan saklar (tangan kosong)",
+          "parent_bone": "foot.R"
+        },
+        {
+          "scenes": "02-07",
+          "state": "Dicopot dari kaki kanan (kaki kanan nyeker) & digenggam tangan kanan di pangkal tumit (sol rata hijau menghadap depan-bawah)",
+          "parent_bone": "wrist.R"
+        },
+        {
+          "scenes": "08",
+          "state": "Terlepas jatuh mid-air dari tangan kanan saat Mas Dimas panik diterbangi kecoak",
+          "parent_bone": "world_freefall"
+        }
+      ]
+    }
+  ],
   "room_tone": {
     "id": "night_fridge_hum",
     "level_db": -32,
@@ -23,7 +71,7 @@
     "camera_height_m": 0.015,
     "base_fov_deg": 95,
     "camera_archetype": "insect_ground",
-    "visual_style": "3D Micro-POV sinematik MPFB2 (Mas Dimas) + properti nyata Poly Haven CC0, AgX Medium High Contrast, Macro DOF, post.py",
+    "visual_style": "3D Micro-POV sinematik MPFB2 (Mas Dimas tanpa kacamata) + properti nyata Poly Haven CC0, AgX Medium High Contrast, Macro DOF, post.py",
     "hud_or_foreground": "Dua antena cokelat gelap menyapu ke tepi luar + ujung 2 kaki depan mikro (Scene 1, 4, 5) + sayap amber berurat transparan (Scene 7–8)"
   },
   "bgm_plan": [
@@ -54,14 +102,15 @@
       "vo_delivery": "Santai dan pelan di kalimat pertama, lalu kaget dan cepat dengan nada apes",
       "camera_archetype": "insect_ground",
       "motion_modifiers": ["handheld_breath", "snap_jerk"],
-      "camera_motion": "01A: diam rendah menghadap kuah mi & bayangan kecoak; 01B: snap_jerk tersentak ke atas saat saklar lampu ditekan Mas Dimas",
-      "visual_action": "01A (0.0–1.0s): Remang biru jam 2 pagi dengan specular tipis di kuah mi & bayangan siluet kecoak; Mas Dimas (kaus merah bata JADI APA, kacamata hitam matte, MEMAKAI SEPASANG sandal jepit hijau di kedua kaki) berdiri di dinding samping menjangkau saklar lampu. 01B (1.05s+): Lampu neon menyala terang, Mas Dimas baru selesai menekan saklar lalu menoleh kaget melihat kecoak di lantai—kedua kaki masih bersandal hijau, belum ada sandal di tangan.",
+      "silent_readability": "Kuah Indomie + bayangan kecoak + pintu kamar kanan terbuka bercahaya hangat -> neon menyala + Mas Dimas kaget",
+      "camera_motion": "01A: diam rendah menghadap kuah mi & bayangan kecoak; 01B: snap_jerk tersentak ke atas saat saklar lampu kanan kulkas ditekan Mas Dimas",
+      "visual_action": "01A (0.0–1.0s): Remang biru jam 2 pagi + cahaya hangat dari pintu kamar kayu sedikit terbuka di dinding kanan; specular tipis di kuah mi & bayangan siluet kecoak; Mas Dimas (kaus merah bata JADI APA + garis kuning, tanpa kacamata, rambut hitam pendek bervolume, MEMAKAI SEPASANG sandal jepit hijau di kedua kaki) baru melangkah keluar pintu kamar kanan berjalan menuju kulkas sambil mengulurkan tangan ke saklar samping kanan kulkas. 01B (1.05s+): Tangan Mas Dimas baru menekan saklar di samping kanan kulkas, lampu neon menyala terang, lalu dia menoleh kaget melihat kecoak—kedua kaki masih bersandal hijau di atas keramik, tangan 100% kosong.",
       "assets_used": ["kitchen_tile_floor", "indomie_bowl_spill", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "light_switch_click", "offset_sec": 1.0},
         {"sfx_id": "fluorescent_hum", "offset_sec": 1.1}
       ],
-      "lighting": "Remang malam biru terbaca + specular kuah -> Flash putih neon terang ekstrem",
+      "lighting": "Remang malam biru + cahaya hangat pintu kamar kanan + specular kuah -> Flash putih neon terang ekstrem",
       "on_screen_text": "JAM 2 PAGI"
     },
     {
@@ -71,8 +120,9 @@
       "vo_delivery": "Dramatis seperti narator trailer film aksi",
       "camera_archetype": "insect_ground",
       "motion_modifiers": ["handheld_breath"],
+      "silent_readability": "Mas Dimas melotot (tanpa kacamata) mengangkat sandal kanan siap menggeplak datar",
       "camera_motion": "Tilt ekstrem ke atas (low angle) + handheld_breath, zoom-in patah-patah ke Mas Dimas yang ancang-ancang menggeplak",
-      "visual_action": "Mas Dimas melangkah maju mengadang, bungkuk melotot di balik kacamata hitam matte. Kontinuitas sandal: kaki KANAN nyeker (sandal kanannya sudah dicopot & digenggam tangan kanan dengan sikut tekuk backswing + sol hijau datar menghadap depan-bawah), sedangkan kaki KIRI TETAP memakai sandal jepit hijau sebelah kiri.",
+      "visual_action": "Mas Dimas melangkah maju mengadang dengan ekspresi melotot marah. Kontinuitas sandal: kaki KANAN nyeker (sandal kanannya sudah dicopot & digenggam tangan kanan di pangkal tumit dengan sol hijau datar menghadap depan-bawah, 0% tembus jari), sedangkan kaki KIRI TETAP memakai sandal jepit hijau yang ter-parent ketat ke tulang foot.L di atas keramik.",
       "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "dramatic_boom", "offset_sec": 0.2},

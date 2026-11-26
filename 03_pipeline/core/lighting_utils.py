@@ -31,9 +31,10 @@ def configure_render_engine(
     engine_upper = engine_choice.upper()
 
     if mode == "storyboard":
-        res_x, res_y = 450, 800
-        cyc_samples, eevee_samples = 12, 16
-        max_bounces = 3
+        # Fast Draft QC (< 60s total for all 9 panels!): 1/4 of 1080x1920 + 4 samples + OIDN, motion blur OFF
+        res_x, res_y = 270, 480
+        cyc_samples, eevee_samples = 4, 8
+        max_bounces = 2
     elif mode == "motion_check":
         res_x, res_y = 360, 640
         cyc_samples, eevee_samples = 8, 8
@@ -130,10 +131,11 @@ def configure_render_engine(
             )
 
     scene.render.engine = "CYCLES"
+    scene.render.use_persistent_data = True
     scene.cycles.device = "GPU" if has_gpu else "CPU"
     scene.cycles.samples = cyc_samples
     scene.cycles.use_adaptive_sampling = True
-    scene.cycles.adaptive_threshold = 0.10 if mode == "motion_check" else (0.08 if mode == "storyboard" else 0.06)
+    scene.cycles.adaptive_threshold = 0.12 if mode == "storyboard" else (0.10 if mode == "motion_check" else 0.06)
     scene.cycles.max_bounces = max_bounces
     scene.cycles.diffuse_bounces = 2 if max_bounces >= 3 else 1
     scene.cycles.glossy_bounces = 2 if max_bounces >= 3 else 1
@@ -143,7 +145,7 @@ def configure_render_engine(
     # Always OpenImageDenoise (Kaggle/Colab T4 driver fails with OptiX denoiser!)
     scene.cycles.denoiser = "OPENIMAGEDENOISE"
     if hasattr(scene.cycles, "denoising_input_passes"):
-        scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL"
+        scene.cycles.denoising_input_passes = "RGB_ALBEDO_NORMAL" if mode != "storyboard" else "RGB_ALBEDO"
     try:
         scene.cycles.denoising_use_gpu = has_gpu
     except Exception:

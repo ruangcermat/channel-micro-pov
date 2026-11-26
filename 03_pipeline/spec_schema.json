@@ -31,6 +31,63 @@
     "target_duration_sec": {
       "type": "number"
     },
+    "ending_type": {
+      "type": "string",
+      "enum": [
+        "hard_cut_punchline",
+        "seamless_loop",
+        "cliffhanger_callback"
+      ]
+    },
+    "silent_readability": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "mute_test_passed": { "type": "boolean" },
+            "hook_visual_clue": { "type": "string" },
+            "notes": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "spatial_plan": {
+      "type": "object",
+      "description": "Pass 2.5 Physical Logic Audit: entry/exit doors, character travel corridor, fixed switch/prop coordinates.",
+      "properties": {
+        "entry_point": { "type": "string" },
+        "destination": { "type": "string" },
+        "fixed_landmarks": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+    "prop_state_chain": {
+      "type": "array",
+      "description": "Pass 2.5 Causality Chain tracking where each hero prop lives per scene (origin -> worn -> gripped -> dropped).",
+      "items": {
+        "type": "object",
+        "required": ["prop_id", "states"],
+        "properties": {
+          "prop_id": { "type": "string" },
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["scenes", "state"],
+              "properties": {
+                "scenes": { "type": "string" },
+                "state": { "type": "string" },
+                "parent_bone": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "tts_config": {
       "type": "object"
     },
@@ -163,6 +220,9 @@
                 "rapid_wing_flutter"
               ]
             }
+          },
+          "silent_readability": {
+            "type": "string"
           },
           "camera_motion": {
             "type": "string"

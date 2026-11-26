@@ -96,15 +96,15 @@ def _wrap_pixel_lines(
 def _compact_action_summary(sid: int, sub_tag: Optional[str], scene_spec: Dict[str, Any]) -> str:
     """Concise 1-line Indonesian Aksi & Kamera summary tailored for mobile/studio storyboard reading."""
     overrides = {
-        (1, "A"): "Remang biru + specular kuah & bayangan kecoak; Mas Dimas di saklar kiri memakai 2 sandal ijo.",
-        (1, "B"): "Lampu nyala + snap_jerk; Mas Dimas baru tekan saklar & kaget (2 sandal di kaki, tangan kosong).",
-        (2, None): "Low-angle + handheld_breath; Mas Dimas bungkuk backswing sandal kanan (kaki kanan nyeker, kiri bersandal).",
+        (1, "A"): "Remang biru + cahaya hangat pintu kamar kanan; Mas Dimas keluar menuju saklar kanan kulkas (2 sandal ijo).",
+        (1, "B"): "Lampu nyala + snap_jerk; Mas Dimas tekan saklar kanan kulkas & kaget (2 sandal di kaki, tangan kosong).",
+        (2, None): "Low-angle + handheld_breath; Mas Dimas ancang-ancang geplak datar (kanan nyeker, kiri bersandal ijo).",
         (3, None): "Bullet-time miring; sandal kanan mengayun datar ke bawah + angin cyan membengkokkan antena.",
         (4, None): "Sandal kanan menghantam lantai + debu tipis + impact_bump & fov_rush 95°->112° menuju kulkas.",
-        (5, None): "Sprint lurus ke kolong kulkas 5,5 cm; kaki KIRI Mas Dimas (bersandal ijo) menghentak menutup jalur.",
-        (6, None): "Whip-pan kiri-kanan-atas; kaki kiri bersandal blokir kolong, tangan kanan backswing sandal siap geplak.",
+        (5, None): "Sprint lurus ke kolong kulkas 5,5 cm; kaki KIRI Mas Dimas (sandal ijo di atas lantai) menutup jalur.",
+        (6, None): "Whip-pan kiri-kanan-atas; kaki kiri bersandal blokir kolong, tangan kanan geplak datar siap hantam.",
         (7, None): "Sayap amber berurat rapid flutter di tepi lensa; kamera aerial_erratic oleng naik ke arah Mas Dimas.",
-        (8, None): "Wajah berkacamata Mas Dimas di upper-third (bayangan gelap + rim tajam), sandal lepas, sayap amber.",
+        (8, None): "Wajah panik Mas Dimas di upper-third (bayangan gelap + rim tajam), sandal lepas mid-air, sayap amber.",
     }
     if (sid, sub_tag) in overrides:
         return overrides[(sid, sub_tag)]

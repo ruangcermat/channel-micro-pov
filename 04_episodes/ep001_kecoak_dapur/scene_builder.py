@@ -162,9 +162,23 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
     puddle_spec_obj.rotation_euler = aim_p.to_track_quat("-Z", "Y").to_euler()
     scene.collection.objects.link(puddle_spec_obj)
 
+    # 8. Warm 2700K Bedroom Lamp inside the ajar right-hand bedroom doorway (spills warm glow into 2 AM kitchen!)
+    bedroom_obj, bedroom_data = lgt_lib.add_area_light(
+        scene,
+        "Light_Bedroom_DoorGlow",
+        (1.96, 2.43, 1.48),
+        (math.radians(78), math.radians(-8), math.radians(82)),
+        0.55,
+        1.15,
+        28.0,
+        (1.0, 0.72, 0.34),
+        spread_deg=85.0,
+    )
+
     return {
         "world_bg": bg,
         "night_light": night_data,
+        "bedroom_light": bedroom_data,
         "neon_light": neon_data,
         "neon_obj": neon_obj,
         "rim_light": rim_data,
@@ -283,7 +297,7 @@ def _configure_wall_clock_0200(anchor: bpy.types.Object) -> None:
 
 
 def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
-    """Fill the widened kosan kitchen & left shelf with 29 Poly Haven CC0 props."""
+    """Fill the kosan kitchen & left shelf with 29 Poly Haven CC0 props while keeping the right bedroom doorway clear."""
     models_dir = assets_dir / "models_3d"
 
     def _gltf(asset_id: str) -> Path:
@@ -298,12 +312,12 @@ def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
     t1, t2, t3, t4, t5, t6, t7 = [z * sh_scale for z in (0.14, 0.38, 0.66, 0.94, 1.22, 1.51, 1.79)]
 
     placements = [
-        # Floor furniture
-        ("cardboard_box_01", "Kardus_DeadEnd_Right", (0.64, 2.48, 0.0), (0.0, 0.0, -18.0), 1.08, 0.0),
-        ("modern_wooden_cabinet", "Kitchen_Cabinet_Right", (1.56, 2.15, 0.0), (0.0, 0.0, -90.0), 0.94, 0.0),
+        # Floor furniture (clear walking path from right bedroom doorway y=2.0..2.86 -> switch beside fridge!)
+        ("cardboard_box_01", "Kardus_DeadEnd_Right", (1.16, 3.24, 0.0), (0.0, 0.0, -14.0), 1.02, 0.0),
+        ("modern_wooden_cabinet", "Kitchen_Cabinet_Right", (1.26, -0.82, 0.0), (0.0, 0.0, -90.0), 0.90, 0.0),
         ("Shelf_01", "Kitchen_Shelf_Left", (-1.06, 1.15, 0.0), (0.0, 0.0, 90.0), sh_scale, 0.0),
         ("WoodenChair_01", "Kitchen_Chair_Left", (-0.94, 0.16, 0.0), (0.0, 0.0, 52.0), 0.92, 0.0),
-        ("wicker_basket_02", "Kitchen_Basket_Right", (0.84, 1.98, 0.0), (0.0, 0.0, 22.0), 0.98, 0.0),
+        ("wicker_basket_02", "Kitchen_Basket_Right", (0.98, 1.66, 0.0), (0.0, 0.0, 22.0), 0.94, 0.0),
         ("wooden_bowl_01", "Kitchen_Bowl_Floor", (0.76, 0.72, 0.0), (0.0, 0.0, 25.0), 0.95, 0.0),
         # Packed left shelf (14 real Poly Haven CC0 props!)
         ("wicker_basket_02", "LeftShelf_Basket_T1", (sh_x, 0.96, t1), (0.0, 0.0, 82.0), 0.48, t1),
@@ -320,17 +334,17 @@ def populate_dense_kosan_kitchen(assets_dir: Path) -> int:
         ("ceramic_vase_03", "LeftShelf_Vase3_T6", (sh_x, 1.08, t6), (0.0, 0.0, 40.0), 0.72, t6),
         ("brass_pan_01", "LeftShelf_Pan_T6", (sh_x, 1.38, t6), (0.0, 0.0, 72.0), 0.58, t6),
         ("pot_enamel_01", "LeftShelf_Pot_T7", (sh_x, 1.14, t7), (0.0, 0.0, -35.0), 0.68, t7),
-        # Right counter & wall shelf
-        ("electric_stove", "Kitchen_Stove", (1.58, 0.65, counter_top_z), (0.0, 0.0, -90.0), 0.88, counter_top_z),
-        ("pot_enamel_01", "Kitchen_Pot_Enamel", (1.54, 0.42, counter_top_z), (0.0, 0.0, 30.0), 0.95, counter_top_z),
-        ("brass_pan_01", "Kitchen_Pan", (1.58, 1.02, counter_top_z), (0.0, 0.0, -145.0), 0.95, counter_top_z),
-        ("wooden_cutting_board", "Kitchen_CuttingBoard", (1.54, 0.12, counter_top_z), (0.0, 0.0, 12.0), 0.95, counter_top_z),
-        ("metal_jug", "Kitchen_MetalJug", (1.56, -0.14, counter_top_z), (0.0, 0.0, -40.0), 0.95, counter_top_z),
-        ("wooden_bowl_02", "Kitchen_Bowl_Shelf", (1.76, 0.28, wall_shelf_top_z), (0.0, 0.0, 15.0), 0.95, wall_shelf_top_z),
-        ("jug_01", "Kitchen_Jug_Shelf", (1.76, 0.68, wall_shelf_top_z), (0.0, 0.0, -30.0), 0.95, wall_shelf_top_z),
-        ("tea_set_01", "Kitchen_TeaSet_Shelf", (1.74, 1.06, wall_shelf_top_z), (0.0, 0.0, -85.0), 0.90, wall_shelf_top_z),
-        # Wall clock strictly at 02:00!
-        ("wall_clock", "Kitchen_WallClock", (0.88, 3.50, 1.92), (0.0, 0.0, 0.0), 1.44, None),
+        # Right counter (x=1.33) & wall shelf (x=1.49)
+        ("electric_stove", "Kitchen_Stove", (1.32, 0.65, counter_top_z), (0.0, 0.0, -90.0), 0.85, counter_top_z),
+        ("pot_enamel_01", "Kitchen_Pot_Enamel", (1.28, 0.42, counter_top_z), (0.0, 0.0, 30.0), 0.92, counter_top_z),
+        ("brass_pan_01", "Kitchen_Pan", (1.32, 1.02, counter_top_z), (0.0, 0.0, -145.0), 0.92, counter_top_z),
+        ("wooden_cutting_board", "Kitchen_CuttingBoard", (1.28, 0.12, counter_top_z), (0.0, 0.0, 12.0), 0.92, counter_top_z),
+        ("metal_jug", "Kitchen_MetalJug", (1.30, -0.14, counter_top_z), (0.0, 0.0, -40.0), 0.92, counter_top_z),
+        ("wooden_bowl_02", "Kitchen_Bowl_Shelf", (1.48, 0.28, wall_shelf_top_z), (0.0, 0.0, 15.0), 0.92, wall_shelf_top_z),
+        ("jug_01", "Kitchen_Jug_Shelf", (1.48, 0.68, wall_shelf_top_z), (0.0, 0.0, -30.0), 0.92, wall_shelf_top_z),
+        ("tea_set_01", "Kitchen_TeaSet_Shelf", (1.46, 1.06, wall_shelf_top_z), (0.0, 0.0, -85.0), 0.88, wall_shelf_top_z),
+        # Wall clock strictly at 02:00 high and clear of Mas Dimas's head in 01A/01B & visible across all scenes!
+        ("wall_clock", "Kitchen_WallClock", (1.06, 3.50, 2.08), (0.0, 0.0, 0.0), 1.44, None),
     ]
 
     placed = 0
@@ -502,18 +516,14 @@ def build_episode_scene(
     lights = setup_world_and_lights(scene, assets_dir)
     populate_dense_kosan_kitchen(assets_dir)
 
-    # Reposition left-wall Broco switch to bare wall past shelf edge (y=2.22) so it sits cleanly inside 01A & 01B!
-    sw1 = bpy.data.objects.get("Wall_LightSwitch_1")
-    if sw1 is not None:
-        sw1.location = (-1.305, 2.22, 1.18)
-
-    # 2. Build stylized Indonesian props + PAIR of green Swallow flip-flops (Left + Right for 100% continuity!)
+    # 2. Build stylized Indonesian props + PAIR of green Swallow flip-flops (Left rigidly BONE-parented to foot.L!)
     props.build_indomie_bowl_spill((0.0, 0.22, 0.0))
     props.build_fridge_under_gap((-0.14, 2.95, 0.0))
     sandal_right = props.build_sandal_jepit_swallow((0.0, 0.0, 0.0))
     sandal_right["root"].name = "Sandal_Right_Root"
     sandal_left = props.build_sandal_jepit_swallow((0.0, 0.0, 0.0))
     sandal_left["root"].name = "Sandal_Left_Root"
+    mh.attach_sandal_to_foot_bone(human, sandal_left["root"], side="L")
 
     wind = props.build_wind_lines((0.0, 0.65, 0.18))
     dust = props.build_dust_puff((0.06, 0.72, 0.014))
@@ -618,6 +628,7 @@ def build_episode_scene(
 
         # Default lighting
         e_night = 0.8
+        e_bedroom = 10.0  # Warm 2700K glow gently spilling from slightly ajar right-hand bedroom door!
         e_neon = 118.0
         neon_y = 2.15
         e_rim = 195.0
@@ -633,7 +644,7 @@ def build_episode_scene(
         w_strength = 0.07
 
         # Default Mas Dimas state & sandal continuity:
-        #   - Left foot ALWAYS wears `sandal_left` (left_sandal_on_foot = True across ALL 8 scenes!)
+        #   - Left foot (`foot.L`) is RIGIDLY BONE-PARENTED to `sandal_left` across ALL 8 scenes (+0.018m lift!)
         #   - Right sandal: "foot" in Scene 1A & 1B | "hand" in Scene 2–7 | "drop" in Scene 8!
         h_loc = (0.04, 1.38, 0.0)
         h_yaw = 0.0
@@ -652,8 +663,9 @@ def build_episode_scene(
         right_hand_target: Optional[Vector] = Vector((-0.34, 1.18, 1.44))
         left_hand_target: Optional[Vector] = None
         r_pole_mode = "backswing"  # "backswing" | "reach_side" | "slam" | "panic"
-        sandal_aim_sole: Optional[Vector] = Vector((0.16, -0.70, -0.69)).normalized()
-        sandal_blade_hint: Optional[Vector] = Vector((-0.65, -0.52, 0.55))
+        # Horizontal-forward swatting orientation (flat green striking sole aims DOWN-FORWARD, NEVER upright ping-pong!)
+        sandal_aim_sole: Optional[Vector] = Vector((0.10, -0.44, -0.89)).normalized()
+        sandal_blade_hint: Optional[Vector] = Vector((-0.28, -0.92, -0.26))
 
         # Default camera
         cam_loc = (0.0, 0.0, cam_h)
@@ -667,7 +679,7 @@ def build_episode_scene(
         wing_flap = 0.0
 
         # =====================================================================
-        # SCENE 1: JAM 2 PAGI — 01A & 01B Continuity: Switch on Left Wall, BOTH Sandals on Feet!
+        # SCENE 1: JAM 2 PAGI — Exits Ajar Right Bedroom Door -> Switch Beside Right of Fridge (BOTH Sandals on Feet!)
         # =====================================================================
         if sid == 1:
             t_flash = 1.05
@@ -676,43 +688,47 @@ def build_episode_scene(
             cam_snap_time = t_flash
 
             if local_sec < t_flash:
-                # 01A (0.0–1.05s): Half-dark 2 AM blue + puddle specular glint + crisp cockroach shadow;
-                # Mas Dimas stands near left wall switch reaching hand to flip it!
-                e_night = 24.0
+                # 01A (0.0–1.05s): Half-dark 2 AM blue + warm golden glow spilling from ajar right bedroom door!
+                # Mas Dimas just stepped out of right bedroom door walking toward fridge & reaching to right-of-fridge switch!
+                e_night = 18.0
+                e_bedroom = 40.0  # Warm 2700K glow pouring out from slightly open right bedroom door!
                 e_neon = 0.0
-                e_rim = 18.0
+                e_rim = 16.0
                 e_fg = 0.0
-                e_roach_spot = 4.2
+                e_roach_spot = 4.5
                 roach_spot_col = (0.54, 0.78, 1.0)
                 e_puddle_spec = 2.6  # Subtle golden specular sheen on Indomie broth without white blowout!
                 e_neon_emit = 0.06
-                w_strength = 0.12
+                w_strength = 0.11
 
                 cam_loc = (0.0, -0.03 + 0.02 * (local_sec / t_flash), cam_h + 0.002)
-                cam_rot = (80.5, 0.0, 1.5)
-                cam_fov = 96.0
+                cam_rot = (82.0, 0.0, -7.5)
+                cam_fov = 98.0
                 dof_dist = 0.22
                 dof_fstop = 3.8
                 cam_motion_intensity = 0.25
                 ant_pitch, ant_spread, ant_jit = -6.0, 10.0, 3.2
 
-                # Mas Dimas positioned near bare left-wall Broco switch (-1.305, 2.22, 1.18), reaching right hand to flip it!
-                h_loc = (-0.60, 2.22, 0.0)
-                h_yaw = -56.0
+                # Stepping out from right bedroom door (x=1.62, y=2.43) toward Broco switch (0.56, 3.535, 1.24)!
+                walk_u = _smooth(local_sec / t_flash)
+                h_loc = (_lerp(1.06, 0.86, walk_u), _lerp(2.64, 2.86, walk_u), 0.0)
+                h_yaw = _lerp(-112.0, -96.0, walk_u)
                 h_hip_drop = 0.03
+                h_stagger_y = 0.12
                 torso_lean = 10.0
                 head_yaw, head_pitch = -12.0, 4.0
                 expr1 = "neutral"
                 r_hand_curls = mh.POINT_SWITCH_CURLS
                 r_pole_mode = "reach_side"
-                right_hand_target = Vector((-1.25, 2.22, 1.18))  # Touching Broco light switch on bare left wall!
+                right_hand_target = Vector((_lerp(0.68, 0.58, walk_u), _lerp(3.26, 3.46, walk_u), 1.24))
             else:
                 # 01B (1.05s+): Neon flashes ON! Camera snap_jerk up!
-                # Mas Dimas just clicked the switch, hand pulling back slightly, head snapping shocked at floor!
+                # Mas Dimas just clicked the Broco switch right beside the fridge & snaps shocked toward the floor!
                 # BOTH green Swallow flip-flops are STILL on his feet — NO sandal in hand!
                 dt = local_sec - t_flash
                 flash_boost = max(0.0, 1.0 - dt / 0.35)
                 e_night = 0.8
+                e_bedroom = 16.0
                 e_neon = 128.0 + 65.0 * flash_boost
                 e_rim = 215.0
                 e_fg = 13.0
@@ -724,29 +740,29 @@ def build_episode_scene(
 
                 jolt = _smooth(min(1.0, dt / 0.22))
                 cam_loc = (0.0, -0.02, cam_h + 0.006 * jolt)
-                cam_rot = (_lerp(81.5, 98.5, jolt), 2.0 * math.sin(jolt * math.pi), 6.5 * jolt)
-                cam_fov = 95.0
-                dof_dist = _lerp(0.24, 1.55, jolt)
-                dof_fstop = 4.0
+                cam_rot = (_lerp(82.0, 97.5, jolt), 2.0 * math.sin(jolt * math.pi), _lerp(-7.5, -5.5, jolt))
+                cam_fov = 97.0
+                dof_dist = _lerp(0.24, 1.85, jolt)
+                dof_fstop = 4.2
                 cam_motion_intensity = 0.35
                 ant_pitch, ant_spread, ant_jit = 22.0, 12.0, 1.6  # Stiff frozen startled antennae!
 
                 turn_u = _smooth(min(1.0, dt / 0.65))
-                h_loc = (_lerp(-0.60, -0.50, turn_u), 2.22, 0.0)
-                h_yaw = _lerp(-56.0, -24.0, turn_u)
+                h_loc = (_lerp(0.84, 0.72, turn_u), _lerp(2.90, 2.98, turn_u), 0.0)
+                h_yaw = _lerp(-92.0, -34.0, turn_u)
                 h_hip_drop = 0.05
                 torso_lean = _lerp(10.0, 14.0, turn_u)
-                torso_tw = _lerp(0.0, 18.0, turn_u)  # Upper body twists cleanly toward camera so JADI APA reads!
-                head_yaw = _lerp(-8.0, 22.0, turn_u)
-                head_pitch = _lerp(4.0, 22.0, turn_u)
+                torso_tw = _lerp(0.0, 22.0, turn_u)  # Upper body twists cleanly toward camera so JADI APA reads!
+                head_yaw = _lerp(-6.0, 18.0, turn_u)
+                head_pitch = _lerp(4.0, 20.0, turn_u)
                 expr1, expr2, expr_k = "neutral", "shock", turn_u
                 r_hand_curls = mh.OPEN_CURLS
                 r_pole_mode = "reach_side"
-                # Right hand hovering right near the Broco switch he just clicked (EMPTY HAND!)
-                right_hand_target = Vector((_lerp(-1.25, -1.08, turn_u), 2.21, _lerp(1.18, 1.15, turn_u)))
+                # Right hand hovering right beside the Broco switch (0.56, 3.535, 1.24) he just clicked (EMPTY HAND!)
+                right_hand_target = Vector((_lerp(0.58, 0.54, turn_u), _lerp(3.48, 3.36, turn_u), _lerp(1.24, 1.22, turn_u)))
 
         # =====================================================================
-        # SCENE 2: BOSS TERAKHIR — Stepped forward! R barefoot, L wearing sandal, BACKSWING SWAT GRIP!
+        # SCENE 2: BOSS TERAKHIR — Stepped forward! R barefoot, L bone-shod, HORIZONTAL SWAT GRIP!
         # =====================================================================
         elif sid == 2:
             e_neon = 114.0
@@ -764,14 +780,14 @@ def build_episode_scene(
             head_yaw = 10.0
             head_pitch = 24.0
             expr1 = "angry"
-            right_sandal_mode = "hand"  # R foot barefoot, L foot wears green sandal!
+            right_sandal_mode = "hand"  # R foot barefoot, L foot wears bone-parented green sandal!
             r_pole_mode = "backswing"
 
-            # Cocked athletic backswing (elbow bent out/back, flat green sole aimed forward-down toward camera!)
+            # Realistic horizontal-forward swat grip: fist grips heel, flat green sole faces STRAIGHT DOWN-FORWARD (ZERO ping-pong!)
             su = _smooth(u)
-            right_hand_target = Vector((_lerp(-0.36, -0.40, su), _lerp(1.28, 1.24, su), _lerp(1.42, 1.54, su)))
-            sandal_aim_sole = Vector((0.20, -0.68, -0.71)).normalized()
-            sandal_blade_hint = Vector((-0.68, -0.50, 0.54))
+            right_hand_target = Vector((_lerp(-0.34, -0.36, su), _lerp(1.24, 1.18, su), _lerp(1.40, 1.46, su)))
+            sandal_aim_sole = Vector((0.08, -0.18, -0.98)).normalized()
+            sandal_blade_hint = Vector((-0.68, -0.72, -0.14))
 
             step_u = _smooth(min(1.0, u * 1.15))
             cam_loc = (_lerp(0.0, -0.02, step_u), _lerp(0.06, 0.12, step_u), cam_h + 0.003)
@@ -783,7 +799,7 @@ def build_episode_scene(
             ant_pitch, ant_spread, ant_jit = 20.0, 10.0, 5.5
 
         # =====================================================================
-        # SCENE 3: CHEAT CODE AKTIF — Bullet-time downward swat + cyan wind + reactive antennae
+        # SCENE 3: CHEAT CODE AKTIF — Bullet-time downward flat swat + cyan wind + reactive antennae
         # =====================================================================
         elif sid == 3:
             e_neon = 104.0
@@ -806,14 +822,14 @@ def build_episode_scene(
             right_sandal_mode = "hand"
             r_pole_mode = "backswing"
 
-            # Downward swat arc: flat green sole clearly angled forward-down toward cockroach!
+            # Downward flat swat arc: flat green striking sole angled flat down toward cockroach (ZERO ping-pong!)
             right_hand_target = Vector((
-                _lerp(-0.38, -0.10, su),
-                _lerp(1.18, 0.68, su),
-                _lerp(1.48, 0.54, su),
+                _lerp(-0.34, -0.10, su),
+                _lerp(1.14, 0.68, su),
+                _lerp(1.42, 0.54, su),
             ))
-            sandal_aim_sole = Vector((0.12, _lerp(-0.56, -0.30, su), _lerp(-0.82, -0.95, su))).normalized()
-            sandal_blade_hint = Vector((-0.55, -0.78, 0.28))
+            sandal_aim_sole = Vector((0.06, _lerp(-0.22, -0.10, su), _lerp(-0.97, -0.99, su))).normalized()
+            sandal_blade_hint = Vector((-0.62, -0.76, -0.18))
 
             cam_loc = (_lerp(0.0, 0.02, u), _lerp(0.04, 0.08, u), cam_h + 0.004)
             cam_rot = (_lerp(116.0, 113.0, u), _lerp(7.0, 11.0, u), _lerp(3.0, 1.5, u))
@@ -932,11 +948,11 @@ def build_episode_scene(
             expr1 = "angry"
             right_sandal_mode = "hand"
             r_pole_mode = "backswing"
-            right_hand_target = Vector((-0.56, 2.20, 1.48))
-            sandal_aim_sole = Vector((0.14, -0.52, -0.84)).normalized()
-            sandal_blade_hint = Vector((-0.62, -0.52, 0.58))
+            right_hand_target = Vector((-0.52, 2.18, 1.44))
+            sandal_aim_sole = Vector((0.10, -0.44, -0.89)).normalized()
+            sandal_blade_hint = Vector((-0.26, -0.92, -0.28))
 
-            # Left foot (WEARING GREEN SWALLOW SANDAL!) lifts high & stomps down squarely blocking the 5.5cm fridge gap!
+            # Left foot (BONE-PARENTED GREEN SWALLOW SANDAL!) lifts high & stomps down squarely blocking the 5.5cm fridge gap!
             if local_sec < t_stomp_start:
                 l_foot_ov = (-0.08, 2.58, 0.40, -14.0)
             elif local_sec < t_stomp_land:
@@ -958,7 +974,7 @@ def build_episode_scene(
             ant_spread, ant_jit = 14.0, 9.0
 
         # =====================================================================
-        # SCENE 6: TERKEPUNG! — Shod LEFT foot blocking gap + barefoot R (UNCROSSED!) + BACKSWING SWAT SANDAL!
+        # SCENE 6: TERKEPUNG! — Bone-Shod LEFT Foot (z=+0.018m ABOVE FLOOR!) + Barefoot R + HORIZONTAL SWAT!
         # =====================================================================
         elif sid == 6:
             e_neon = 118.0
@@ -966,12 +982,12 @@ def build_episode_scene(
             e_rim = 190.0
             e_fg = 10.0
             w_strength = 0.07
-            # Natural wide athletic stance (-0.24): barefoot R foot on viewer-left (~ -0.36), shod L foot on viewer-right (~ -0.06) blocking gap!
+            # Natural wide athletic stance (-0.24): barefoot R foot on viewer-left, bone-shod L foot blocking gap!
             h_loc = (-0.24, 2.50, 0.0)
             h_yaw = -8.0
             h_hip_drop = 0.08
             h_stance_scale = 0.85
-            l_foot_ov = (-0.06, 2.38, 0.0, 0.0)  # Shod LEFT foot squarely blocking fridge gap (ZERO crossed legs!)
+            l_foot_ov = (-0.06, 2.38, 0.0, 0.0)  # Bone-shod LEFT foot squarely blocking fridge gap (z=+0.018m!)
             torso_lean = 18.0
             torso_tw = -8.0
             head_yaw = 10.0
@@ -980,11 +996,11 @@ def build_episode_scene(
             right_sandal_mode = "hand"
             r_pole_mode = "backswing"
 
-            # Cocked backswing overhead inside frame: flat green striking sole aimed down toward camera!
+            # Horizontal-forward swat grip overhead: flat green striking sole aimed STRAIGHT DOWN-FORWARD (ZERO ping-pong!)
             drop_u = _smooth(max(0.0, (u - 0.65) / 0.35))
-            right_hand_target = Vector((-0.56, 2.18, _lerp(1.52, 1.38, drop_u)))
-            sandal_aim_sole = Vector((0.20, -0.58, -0.79)).normalized()
-            sandal_blade_hint = Vector((-0.68, -0.48, 0.56))
+            right_hand_target = Vector((-0.48, 2.16, _lerp(1.46, 1.34, drop_u)))
+            sandal_aim_sole = Vector((0.08, -0.18, -0.98)).normalized()
+            sandal_blade_hint = Vector((-0.68, -0.72, -0.14))
 
             if u < 0.18:
                 bu = _smooth(u / 0.18)
@@ -1037,9 +1053,9 @@ def build_episode_scene(
             expr1, expr2, expr_k = "angry", "shock", _smooth(max(0.0, (u - 0.40) / 0.60))
             right_sandal_mode = "hand"
             r_pole_mode = "backswing"
-            right_hand_target = Vector((-0.36, 2.22, _lerp(1.48, 1.36, _smooth(u))))
-            sandal_aim_sole = Vector((0.20, -0.72, -0.66)).normalized()
-            sandal_blade_hint = Vector((-0.66, -0.45, 0.60))
+            right_hand_target = Vector((-0.34, 2.18, _lerp(1.42, 1.34, _smooth(u))))
+            sandal_aim_sole = Vector((0.08, -0.24, -0.97)).normalized()
+            sandal_blade_hint = Vector((-0.66, -0.72, -0.18))
 
             if local_sec < t_wings:
                 u0 = _smooth(local_sec / max(0.1, t_wings))
@@ -1068,7 +1084,7 @@ def build_episode_scene(
             ant_pitch, ant_spread, ant_jit = 12.0, 22.0, 11.5
 
         # =====================================================================
-        # SCENE 8: MAAF YA BANG — Upper-Third Safe-Zone Glasses Face + Dark Shadow + Falling Sandal + Amber Wings!
+        # SCENE 8: MAAF YA BANG — Upper-Third Safe-Zone Bare Expressive Face + Dark Shadow + Falling Sandal + Amber Wings!
         # =====================================================================
         elif sid == 8:
             # Tight behind-head halo rim light (never shines on foreground wings or chest!) + deep shadow on face!
@@ -1079,8 +1095,9 @@ def build_episode_scene(
             rim_loc = (0.0, 2.78, 2.02)
             rim_rot = (-38.0, 0.0, 0.0)
             e_fg = 0.0
-            e_face_fill = 0.16  # Tiny whisper so eyes/glasses/mouth stay razor-clear inside dramatic shadow!
+            e_face_fill = 0.16  # Tiny whisper so eyes/mouth stay razor-clear inside dramatic shadow!
             e_night = 0.0
+            e_bedroom = 0.0
             w_strength = 0.012
 
             dur8 = float(s_meta["scene_duration_sec"])
@@ -1105,8 +1122,8 @@ def build_episode_scene(
                 r_pole_mode = "backswing"
                 right_hand_target = Vector((-0.24, 2.16, 1.40))
                 left_hand_target = Vector((0.26, 2.22, 1.24))
-                sandal_aim_sole = Vector((0.15, -0.78, -0.61)).normalized()
-                sandal_blade_hint = Vector((-0.55, -0.35, 0.76))
+                sandal_aim_sole = Vector((0.12, -0.58, -0.80)).normalized()
+                sandal_blade_hint = Vector((-0.25, -0.90, -0.35))
             else:
                 # Throws both hands up in terror INSIDE 9:16 frame & releases green Swallow sandal mid-air!
                 right_sandal_mode = "drop"
@@ -1116,7 +1133,7 @@ def build_episode_scene(
                 right_hand_target = Vector((-0.24, 2.16, _lerp(1.42, 1.56, recoil_u)))
                 left_hand_target = Vector((0.28, 2.20, _lerp(1.30, 1.52, recoil_u)))
 
-            # Camera positioned so Mas Dimas's shocked glasses face sits cleanly in UPPER-THIRD safe zone
+            # Camera positioned so Mas Dimas's terrified face sits cleanly in UPPER-THIRD safe zone
             # (100% clear of MarginV=380 subtitles!), with Crimson JADI APA tee + falling green sandal + amber wings!
             dive_u = min(1.0, local_sec / max(0.1, t_black))
             ease = dive_u ** 1.30
@@ -1151,8 +1168,10 @@ def build_episode_scene(
         )
 
         # ---- APPLY MAS DIMAS POSE (NEVER A-POSE!) ----
-        left_shod_lift = 0.016  # Left foot ALWAYS wears left green Swallow flip-flop!
-        right_shod_lift = 0.016 if right_sandal_mode == "foot" else 0.0  # Barefoot (nyeker) from Scene 2 onward!
+        # Foot.L is ALWAYS raised by +0.018m (exact sandal sole thickness) so bone-parented `sandal_left`
+        # sits 100% ABOVE the ceramic floor (`z >= +0.001m`, ZERO sinking!)
+        left_shod_lift = 0.018
+        right_shod_lift = 0.018 if right_sandal_mode == "foot" else 0.0  # Barefoot (nyeker) from Scene 2 onward!
         mh.place_and_feet(
             human,
             h_loc,
@@ -1170,7 +1189,10 @@ def build_episode_scene(
         mh.head_turn(arm, head_yaw, head_pitch)
         mh.D.pose_arms(arm, yaw_deg=h_yaw + torso_tw, elbow=16.0)
         mh.D.relaxed_hands(arm)
-        mh.set_hand_curl(arm, "R", r_hand_curls, wrist_pitch=-12.0 if right_sandal_mode == "hand" else -4.0, twist=32.0)
+        # Pronate right wrist (-38 deg) when holding sandal so palm/fingers wrap over top footbed while green sole aims DOWN!
+        r_wrist_pitch = -18.0 if right_sandal_mode == "hand" else -4.0
+        r_wrist_twist = -38.0 if right_sandal_mode == "hand" else 28.0
+        mh.set_hand_curl(arm, "R", r_hand_curls, wrist_pitch=r_wrist_pitch, twist=r_wrist_twist)
         if l_hand_curls is not None:
             mh.set_hand_curl(arm, "L", l_hand_curls, wrist_pitch=-6.0, twist=20.0)
 
@@ -1178,7 +1200,7 @@ def build_episode_scene(
         if right_hand_target is not None:
             if r_pole_mode == "backswing":
                 # Realistic swat backswing: elbow bends outward-right & slightly back-up!
-                r_pole = -fwd_v * 0.60 - left_v * 0.95 + Vector((0.0, 0.0, 0.20))
+                r_pole = -fwd_v * 0.55 - left_v * 0.95 + Vector((0.0, 0.0, 0.25))
             elif r_pole_mode == "reach_side":
                 r_pole = -fwd_v * 0.45 - left_v * 0.70 + Vector((0.0, 0.0, -0.55))
             elif r_pole_mode == "slam":
@@ -1194,10 +1216,8 @@ def build_episode_scene(
         mh.set_face(human, t_global, fps, expr1, expr2, expr_k, jaw_extra=jaw_ex, frame=fr)
 
         # ---- SANDAL CONTINUITY LOCK ----
-        # 1. LEFT sandal: ALWAYS worn snugly on Mas Dimas's LEFT foot across ALL 8 scenes!
-        mh.snap_sandal_to_foot(human, sandal_left["root"], "L", fr, floor_clamp=True)
-
-        # 2. RIGHT sandal: worn on RIGHT foot (Scene 1A & 1B) -> gripped in RIGHT hand (Scene 2-7) -> dropped (Scene 8)!
+        # 1. LEFT sandal (`sandal_left`): RIGIDLY BONE-PARENTED to `foot.L` -> follows foot with 0.0mm gap!
+        # 2. RIGHT sandal: worn level on RIGHT foot (01A & 01B) -> gripped in RIGHT hand (02-07) -> dropped (08)!
         if right_sandal_mode == "foot":
             mh.snap_sandal_to_foot(human, sandal_right["root"], "R", fr, floor_clamp=True)
         elif right_sandal_mode == "hand":
@@ -1232,7 +1252,7 @@ def build_episode_scene(
             sandal_right["root"].keyframe_insert("location", frame=fr)
             sandal_right["root"].keyframe_insert("rotation_quaternion", frame=fr)
 
-        # In Scene 8, dynamically focus Macro DOF squarely onto Mas Dimas's glasses & terrified eyes!
+        # In Scene 8, dynamically focus Macro DOF squarely onto Mas Dimas's terrified eyes!
         if sid == 8:
             face_pt = mh.eye_mid(human)
             dof_dist = max(0.15, (face_pt - Vector(cam_loc_final)).length)
@@ -1264,6 +1284,7 @@ def build_episode_scene(
         _kf_loc_rot(lights["neon_obj"], fr, loc=(0.0, neon_y, 2.56))
         _kf_loc_rot(lights["rim_obj"], fr, loc=rim_loc, rot_deg=rim_rot)
         _kf_light(lights["night_light"], fr, e_night)
+        _kf_light(lights["bedroom_light"], fr, e_bedroom)
         _kf_light(lights["neon_light"], fr, e_neon)
         _kf_light(lights["rim_light"], fr, e_rim)
         _kf_light(lights["fg_light"], fr, e_fg)

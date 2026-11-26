@@ -436,30 +436,58 @@ def build_kitchen_tile_floor(
     _make_beveled_box("Wall_Back", (4.6, 0.12, 2.8), 0.005, wall_mat, root, (0.35, 3.61, 1.4), collection=collection)
     _make_beveled_box("Baseboard_Back", (4.6, 0.02, 0.10), 0.004, baseboard_mat, root, (0.35, 3.54, 0.05), collection=collection)
 
-    # Right wall widened to x = 1.92m
-    _make_beveled_box("Wall_Right", (0.12, 7.6, 2.8), 0.005, wall_mat, root, (1.98, 1.8, 1.4), collection=collection)
-    _make_beveled_box("Baseboard_Right", (0.02, 7.6, 0.10), 0.004, baseboard_mat, root, (1.91, 1.8, 0.05), collection=collection)
+    # Right wall at x = 1.62m with REAL recessed kosan bedroom doorway (y = 2.00..2.86, z = 0..2.06)!
+    # Split Wall_Right into front segment, back segment, and lintel header so bedroom door opens naturally into room alcove.
+    _make_beveled_box("Wall_Right_Front", (0.12, 4.00, 2.8), 0.005, wall_mat, root, (1.68, 0.00, 1.4), collection=collection)
+    _make_beveled_box("Wall_Right_Back", (0.12, 2.74, 2.8), 0.005, wall_mat, root, (1.68, 4.23, 1.4), collection=collection)
+    _make_beveled_box("Wall_Right_Header", (0.12, 0.90, 0.74), 0.005, wall_mat, root, (1.68, 2.43, 2.43), collection=collection)
+    _make_beveled_box("Baseboard_Right_Front", (0.02, 4.00, 0.10), 0.004, baseboard_mat, root, (1.61, 0.00, 0.05), collection=collection)
+    _make_beveled_box("Baseboard_Right_Back", (0.02, 2.74, 0.10), 0.004, baseboard_mat, root, (1.61, 4.23, 0.05), collection=collection)
+
+    # Cozy kosan bedroom alcove behind the right doorway (warm plaster + wood floor so light spills realistically!)
+    bed_wall_mat = make_material("Mat_Bedroom_Wall", (0.42, 0.34, 0.25, 1.0), roughness=0.82)
+    bed_floor_mat = make_material("Mat_Bedroom_Floor", (0.28, 0.22, 0.16, 1.0), roughness=0.55)
+    _make_beveled_box("Bedroom_Alcove_Back", (0.08, 1.60, 2.6), 0.0, bed_wall_mat, root, (2.42, 2.43, 1.3), collection=collection)
+    _make_beveled_box("Bedroom_Alcove_Side1", (0.85, 0.08, 2.6), 0.0, bed_wall_mat, root, (2.04, 1.68, 1.3), collection=collection)
+    _make_beveled_box("Bedroom_Alcove_Side2", (0.85, 0.08, 2.6), 0.0, bed_wall_mat, root, (2.04, 3.18, 1.3), collection=collection)
+    _make_beveled_box("Bedroom_Alcove_Floor", (0.90, 1.60, 0.04), 0.0, bed_floor_mat, root, (2.04, 2.43, -0.018), collection=collection)
+    _make_beveled_box("Bedroom_Alcove_Ceil", (0.90, 1.60, 0.08), 0.0, bed_wall_mat, root, (2.04, 2.43, 2.60), collection=collection)
+
+    # Classic Indonesian wooden kosan bedroom door frame (kusen) + slightly ajar paneled wooden door leaf (~28 deg inward)
+    door_frame_mat = make_material("Mat_Door_FrameWood", (0.16, 0.09, 0.045, 1.0), roughness=0.55)
+    door_leaf_mat = make_material("Mat_Door_LeafWood", (0.24, 0.135, 0.065, 1.0), roughness=0.48, coat=0.12)
+    door_panel_mat = make_material("Mat_Door_PanelWood", (0.19, 0.105, 0.050, 1.0), roughness=0.52)
+    brass_knob_mat = make_material("Mat_Door_BrassKnob", (0.76, 0.58, 0.22, 1.0), roughness=0.26, metallic=0.92)
+    door_root = _make_empty("Kosan_BedroomDoor_Root", (1.62, 2.43, 0.0), parent=root, collection=collection)
+    # Kusen jambs & top header
+    _make_beveled_box("Door_Kusen_Front", (0.14, 0.06, 2.08), 0.004, door_frame_mat, door_root, (0.04, -0.45, 1.04), collection=collection)
+    _make_beveled_box("Door_Kusen_Back", (0.14, 0.06, 2.08), 0.004, door_frame_mat, door_root, (0.04, 0.45, 1.04), collection=collection)
+    _make_beveled_box("Door_Kusen_Top", (0.14, 0.96, 0.06), 0.004, door_frame_mat, door_root, (0.04, 0.0, 2.07), collection=collection)
+    # Hinged door leaf pivot at back jamb (y=+0.42), swung inward +30 deg into bedroom so warm gap faces kitchen!
+    door_pivot = _make_empty("Door_Leaf_Pivot", (0.03, 0.42, 0.0), parent=door_root, collection=collection)
+    door_pivot.rotation_euler = (0.0, 0.0, math.radians(32.0))
+    _make_beveled_box("Door_Leaf_Main", (0.042, 0.84, 2.02), 0.004, door_leaf_mat, door_pivot, (0.0, -0.42, 1.015), collection=collection)
+    _make_beveled_box("Door_Panel_Top", (0.048, 0.58, 0.68), 0.003, door_panel_mat, door_pivot, (0.0, -0.42, 1.46), collection=collection)
+    _make_beveled_box("Door_Panel_Bot", (0.048, 0.58, 0.64), 0.003, door_panel_mat, door_pivot, (0.0, -0.42, 0.56), collection=collection)
+    # Brass doorknob on kitchen side & room side
+    _make_beveled_box("Door_Knob_Kitchen", (0.06, 0.045, 0.045), 0.015, brass_knob_mat, door_pivot, (-0.045, -0.75, 0.98), collection=collection)
 
     # Front wall behind camera start at y = -1.6m (prevents empty void reflections!)
     _make_beveled_box("Wall_Front", (4.6, 0.12, 2.8), 0.005, wall_mat, root, (0.35, -1.65, 1.4), collection=collection)
 
-    # Indonesian kosan concrete/wood kitchen counter along right wall (x=1.32..1.90, y=-0.3..1.45, z=0..0.82)
-    _make_beveled_box("Kosan_Counter_Base", (0.56, 1.75, 0.78), 0.006, counter_wood_mat, root, (1.62, 0.58, 0.39), collection=collection)
-    _make_beveled_box("Kosan_Counter_Top", (0.60, 1.80, 0.045), 0.006, counter_top_mat, root, (1.60, 0.58, 0.805), collection=collection)
+    # Indonesian kosan concrete/wood kitchen counter along front-right wall (x=1.08..1.60, y=-0.3..1.45, z=0..0.82)
+    _make_beveled_box("Kosan_Counter_Base", (0.52, 1.72, 0.78), 0.006, counter_wood_mat, root, (1.35, 0.56, 0.39), collection=collection)
+    _make_beveled_box("Kosan_Counter_Top", (0.56, 1.76, 0.045), 0.006, counter_top_mat, root, (1.33, 0.56, 0.805), collection=collection)
     # Floating wall shelf above counter
-    _make_beveled_box("Kosan_Wall_Shelf", (0.24, 1.45, 0.03), 0.004, counter_wood_mat, root, (1.78, 0.60, 1.48), collection=collection)
+    _make_beveled_box("Kosan_Wall_Shelf", (0.24, 1.40, 0.03), 0.004, counter_wood_mat, root, (1.49, 0.58, 1.48), collection=collection)
 
-    # Wall Detail 1: Classic Indonesian Broco Light Switch on back wall (left of fridge) & left wall
-    switch_plate_mat = make_material("Mat_Switch_Plate", (0.76, 0.75, 0.72, 1.0), roughness=0.32)
-    switch_key_mat = make_material("Mat_Switch_Key", (0.68, 0.67, 0.64, 1.0), roughness=0.35)
-    for idx, (sx, sy, sz, rot_z) in enumerate([
-        (-0.84, 3.535, 1.24, 0.0),
-        (-1.305, 1.85, 1.24, math.radians(90.0)),
-    ]):
-        sw_root = _make_empty(f"Wall_LightSwitch_{idx}", (sx, sy, sz), parent=root, collection=collection)
-        sw_root.rotation_euler = (0.0, 0.0, rot_z)
-        _make_beveled_box(f"Switch_Plate_{idx}", (0.085, 0.012, 0.085), 0.003, switch_plate_mat, sw_root, (0.0, 0.0, 0.0), collection=collection)
-        _make_beveled_box(f"Switch_Rocker_{idx}", (0.022, 0.016, 0.042), 0.002, switch_key_mat, sw_root, (0.0, -0.006, 0.0), (math.radians(8.0), 0.0, 0.0), collection=collection)
+    # Wall Detail 1: Classic Indonesian Broco Light Switch squarely beside RIGHT side of fridge (near bedroom door!)
+    switch_plate_mat = make_material("Mat_Switch_Plate", (0.82, 0.81, 0.78, 1.0), roughness=0.30)
+    switch_key_mat = make_material("Mat_Switch_Key", (0.72, 0.71, 0.68, 1.0), roughness=0.34)
+    sw_root = _make_empty("Wall_LightSwitch_0", (0.56, 3.535, 1.24), parent=root, collection=collection)
+    sw_root.rotation_euler = (0.0, 0.0, 0.0)
+    _make_beveled_box("Switch_Plate_0", (0.092, 0.014, 0.092), 0.003, switch_plate_mat, sw_root, (0.0, 0.0, 0.0), collection=collection)
+    _make_beveled_box("Switch_Rocker_0", (0.024, 0.018, 0.046), 0.002, switch_key_mat, sw_root, (0.0, -0.007, 0.0), (math.radians(8.0), 0.0, 0.0), collection=collection)
 
     # Wall Detail 2: Classic Indonesian Kosan Wall Calendar (red header + crisp date grid) on back wall
     cal_root = _make_empty("Kosan_WallCalendar", (-0.86, 3.535, 1.82), parent=root, collection=collection)

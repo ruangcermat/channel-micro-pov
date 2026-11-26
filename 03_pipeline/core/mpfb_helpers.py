@@ -105,11 +105,11 @@ EXPR: Dict[str, Dict[str, float]] = {
 }
 
 GRIP_CURLS: Dict[str, Tuple[float, float, float]] = {
-    "1": (26.0, 28.0, 22.0),
-    "2": (68.0, 74.0, 52.0),
-    "3": (72.0, 78.0, 56.0),
-    "4": (74.0, 80.0, 58.0),
-    "5": (74.0, 80.0, 58.0),
+    "1": (22.0, 24.0, 18.0),
+    "2": (48.0, 56.0, 40.0),
+    "3": (52.0, 60.0, 44.0),
+    "4": (54.0, 62.0, 46.0),
+    "5": (54.0, 62.0, 46.0),
 }
 
 POINT_SWITCH_CURLS: Dict[str, Tuple[float, float, float]] = {
@@ -156,7 +156,7 @@ def _lerp(a: float, b: float, t: float) -> float:
 
 
 # =============================================================================
-# MATERIAL, OUTFIT, HAIR & GLASSES BUILDERS (PERMANENT MASCOT: MAS DIMAS)
+# MATERIAL, OUTFIT & VOLUMINOUS HAIR BUILDERS (PERMANENT MASCOT: MAS DIMAS)
 # =============================================================================
 
 def _fix_teeth_materials() -> None:
@@ -184,28 +184,112 @@ def _fix_teeth_materials() -> None:
                 bsdf.inputs[k].default_value = 0.4 if k == "Specular IOR Level" else 0.0
 
 
+def _sculpt_voluminous_male_hair(hair_obj: bpy.types.Object) -> None:
+    """Reshape flat MPFB2 short01 cap into a natural, matte, voluminous Indonesian male textured crop!
+
+    Preserves 100% of MPFB2 bone vertex weights & Subdivision modifier — lowers the high forehead hairline
+    into soft asymmetric textured bangs/fringe, widens upper temple fullness so the silhouette reads cleanly
+    from the front (never a cone/helmet or flat swim cap!), and adds balanced organic crown volume.
+    """
+    if hair_obj.get("_mas_dimas_hair_volumized"):
+        return
+    mesh = hair_obj.data
+    verts = mesh.vertices
+    if not verts:
+        return
+
+    zs = [v.co.z for v in verts]
+    ys = [v.co.y for v in verts]
+    z_min, z_max = min(zs), max(zs)
+    y_min, y_max = min(ys), max(ys)
+    z_span = max(1e-4, z_max - z_min)
+    y_span = max(1e-4, y_max - y_min)
+
+    for v in verts:
+        x, y, z = v.co.x, v.co.y, v.co.z
+        zn = (z - z_min) / z_span      # 0 = nape/sideburns, 1 = top crown
+        fn = (y_max - y) / y_span      # 0 = back of head, 1 = front hairline
+
+        # 1. Balanced crown fullness (broad natural silhouette, NOT a narrow tall helmet/cone!)
+        top_w = max(0.0, (zn - 0.48) / 0.52) ** 1.35
+        # Soft asymmetric part sweep (slightly fuller on viewer-left / Mas Dimas's right side)
+        asym_sweep = 1.0 + 0.16 * math.sin((x + 0.022) * 16.0)
+        # Gentle organic textured hair clumps (matte & natural, never bumpy plastic)
+        lock_wave = (
+            0.0028 * math.sin(x * 74.0 + y * 32.0)
+            + 0.0018 * math.cos(x * 130.0 - z * 42.0)
+        )
+
+        # Balanced crown lift (+1.2cm to +1.8cm)
+        dz = top_w * (0.012 + 0.006 * fn) * asym_sweep + top_w * lock_wave
+
+        # Fuller upper sides / temples (+1.1cm outward) -> frames face naturally from front view!
+        temple_w = max(0.0, (zn - 0.36) / 0.64) * (1.0 - 0.25 * max(0.0, zn - 0.88))
+        dx = x * (0.18 * temple_w) + temple_w * 0.002 * math.sin(z * 50.0 + y * 35.0)
+
+        # Lower front hairline smoothly into soft textured bangs/fringe (eliminates giant forehead!)
+        # Eyebrows sit around z ~ 1.185; front hair lower edge sits at z ~ 1.215 -> safely lowers to ~1.202!
+        front_edge_w = max(0.0, (fn - 0.56) / 0.44) * max(0.0, 1.0 - abs(zn - 0.68) / 0.36)
+        fringe_locks = 0.0055 * (0.55 + 0.45 * math.sin(x * 86.0 + 0.45)) + 0.0022 * math.cos(x * 155.0)
+        dz -= front_edge_w * (0.014 + fringe_locks)
+        # Forward lift of the front fringe away from forehead skin so it casts a real soft hair shadow!
+        dy = -front_edge_w * (0.015 + 0.004 * math.sin(x * 65.0))
+
+        # Soft natural back volume
+        back_w = max(0.0, (0.38 - fn) / 0.38) * max(0.0, (zn - 0.30) / 0.70)
+        dy += back_w * 0.008
+
+        v.co = Vector((x + dx, y + dy, z + dz))
+
+    mesh.update()
+    hair_obj["_mas_dimas_hair_volumized"] = True
+
+
 def _polish_mas_dimas_skin_and_hair(body: bpy.types.Object) -> None:
-    """Expose full anatomical bare feet (keep Hide helpers!) + natural warm matte Indonesian skin + black hair."""
+    """Expose full bare feet (keep Hide helpers!), warm Southeast Asian skin tone, & matte voluminous black hair."""
     for mod in list(body.modifiers):
         if mod.type == "MASK" and mod.name.startswith("Delete."):
             body.modifiers.remove(mod)
 
-    for m in body.data.materials:
-        if not m or not m.use_nodes:
-            continue
-        bsdf = next((n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-        if not bsdf:
-            continue
-        if "Roughness" in bsdf.inputs and not bsdf.inputs["Roughness"].is_linked:
-            bsdf.inputs["Roughness"].default_value = max(0.56, bsdf.inputs["Roughness"].default_value)
-        for k in ("Coat Weight", "Specular IOR Level"):
-            if k in bsdf.inputs:
-                bsdf.inputs[k].default_value = 0.0 if k == "Coat Weight" else 0.30
+    def _walk_skin(nt: bpy.types.NodeTree) -> None:
+        for n in nt.nodes:
+            if n.type == "BSDF_PRINCIPLED":
+                if "Roughness" in n.inputs and not n.inputs["Roughness"].is_linked:
+                    n.inputs["Roughness"].default_value = max(0.56, n.inputs["Roughness"].default_value)
+                if "Coat Weight" in n.inputs:
+                    n.inputs["Coat Weight"].default_value = 0.0
+                if "Specular IOR Level" in n.inputs:
+                    n.inputs["Specular IOR Level"].default_value = 0.28
+                bc = n.inputs.get("Base Color")
+                if bc and bc.links:
+                    src_sock = bc.links[0].from_socket
+                    if src_sock.node.type != "HUE_SAT":
+                        # Warm natural Southeast Asian / Indonesian skin tone (young_asian_male warm tint)
+                        hsv = nt.nodes.new("ShaderNodeHueSaturation")
+                        hsv.inputs["Hue"].default_value = 0.493
+                        hsv.inputs["Saturation"].default_value = 1.15
+                        hsv.inputs["Value"].default_value = 0.78
+                        nt.links.remove(bc.links[0])
+                        nt.links.new(src_sock, hsv.inputs["Color"])
+                        nt.links.new(hsv.outputs["Color"], bc)
+            elif n.type == "GROUP" and n.node_tree:
+                _walk_skin(n.node_tree)
 
-    # Natural dark black short hair on Mas Dimas (short01)
+    for m in body.data.materials:
+        if m and m.use_nodes and m.node_tree:
+            _walk_skin(m.node_tree)
+
+    # Matte voluminous natural dark-black short male hair + matching dark Indonesian eyebrows!
     for obj in bpy.data.objects:
-        if obj.type != "MESH" or "short01" not in obj.name.lower():
+        if obj.type != "MESH":
             continue
+        lname = obj.name.lower()
+        is_hair = "short01" in lname or "hair" in lname
+        is_brow = "eyebrow" in lname
+        if not (is_hair or is_brow):
+            continue
+        if is_hair:
+            _sculpt_voluminous_male_hair(obj)
         for m in obj.data.materials:
             if not m or not m.use_nodes:
                 continue
@@ -216,15 +300,20 @@ def _polish_mas_dimas_skin_and_hair(body: bpy.types.Object) -> None:
             if bc:
                 if bc.is_linked:
                     src_sock = bc.links[0].from_socket
-                    hs = m.node_tree.nodes.new("ShaderNodeHueSaturation")
-                    hs.inputs["Value"].default_value = 0.22
-                    hs.inputs["Saturation"].default_value = 0.35
-                    m.node_tree.links.new(src_sock, hs.inputs["Color"])
-                    m.node_tree.links.new(hs.outputs["Color"], bc)
+                    if src_sock.node.type != "HUE_SAT":
+                        hs = m.node_tree.nodes.new("ShaderNodeHueSaturation")
+                        hs.inputs["Value"].default_value = 0.14 if is_hair else 0.18
+                        hs.inputs["Saturation"].default_value = 0.28
+                        m.node_tree.links.new(src_sock, hs.inputs["Color"])
+                        m.node_tree.links.new(hs.outputs["Color"], bc)
                 else:
-                    bc.default_value = (0.025, 0.022, 0.020, 1.0)
+                    bc.default_value = (0.016, 0.013, 0.011, 1.0)
             if "Roughness" in bsdf.inputs and not bsdf.inputs["Roughness"].is_linked:
-                bsdf.inputs["Roughness"].default_value = 0.58
+                bsdf.inputs["Roughness"].default_value = 0.72 if is_hair else 0.68
+            if "Specular IOR Level" in bsdf.inputs:
+                bsdf.inputs["Specular IOR Level"].default_value = 0.14
+            if "Coat Weight" in bsdf.inputs:
+                bsdf.inputs["Coat Weight"].default_value = 0.0
 
 
 def _crop_pants_to_kosan_shorts(cloth_obj: bpy.types.Object, arm: bpy.types.Object) -> None:
@@ -531,18 +620,18 @@ def build_mas_dimas_master(
     out_blend_path: Path,
     front_check_png: Optional[Path] = None,
 ) -> Path:
-    """Build permanent mascot `mas_dimas_ready.blend` from `family_ready.blend` with 100% packed textures."""
+    """Build permanent mascot `mas_dimas_ready.blend` from `family_ready.blend` (NO glasses, voluminous hair, warm SE Asian skin)."""
     bpy.ops.wm.open_mainfile(filepath=str(family_blend_path))
 
-    # Strip non-Mas-Dimas rigs/studio objects cleanly
-    keep_names = {"Kid_rig"}
+    # Strip non-Mas-Dimas rigs/studio objects, shoes, and any glasses cleanly
     keep_objs = set()
     arm = bpy.data.objects.get("Kid_rig")
     if arm is None:
         raise RuntimeError(f"Kid_rig not found in {family_blend_path}")
     keep_objs.add(arm)
     for ch in arm.children_recursive:
-        if "shoes" not in ch.name.lower():
+        lname = ch.name.lower()
+        if "shoes" not in lname and "glasses" not in lname:
             keep_objs.add(ch)
 
     for obj in list(bpy.data.objects):
@@ -553,7 +642,7 @@ def build_mas_dimas_master(
     for w in list(bpy.data.worlds):
         bpy.data.worlds.remove(w)
 
-    # Reset rig to clean rest pose at origin before building outfit & glasses
+    # Reset rig to clean rest pose at origin before building outfit & hair
     arm.animation_data_clear()
     arm.rotation_mode = "XYZ"
     arm.location = (0.0, 0.0, 0.0)
@@ -575,7 +664,6 @@ def build_mas_dimas_master(
     if cloth_obj is None:
         raise RuntimeError("Human.male_casualsuit06 not found in family_ready.blend")
     _apply_mas_dimas_crimson_outfit(cloth_obj, arm)
-    _add_mas_dimas_glasses(arm)
 
     # Clean orphaned data blocks & pack ALL textures inside mas_dimas_ready.blend!
     try:
@@ -586,7 +674,7 @@ def build_mas_dimas_master(
 
     out_blend_path.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(out_blend_path), compress=True)
-    print(f"[MAS_DIMAS] Saved packed permanent mascot master -> {out_blend_path}", flush=True)
+    print(f"[MAS_DIMAS] Saved packed permanent mascot master (no glasses, voluminous hair) -> {out_blend_path}", flush=True)
 
     if front_check_png is not None:
         render_mas_dimas_front_check(out_blend_path, front_check_png)
@@ -596,15 +684,15 @@ def build_mas_dimas_master(
 
 def render_mas_dimas_front_check(mas_dimas_blend: Path, out_png: Path) -> Path:
     """Render a crisp studio front-view verification (`mas_dimas_front_check.png`) showing:
-    - Crimson/Brick Red `#A62C2B` kaus with bold white `JADI APA` centered (non-mirrored, zero seam cut!)
-    - Matte black rectangular glasses with zero lens glare & sharp wide-eyed expression
-    - Short natural black hair, dark kosan shorts, and barefoot feet!
+    - Crimson/Brick Red `#A62C2B` kaus with bold white `JADI APA` + yellow accent line centered (non-mirrored!)
+    - Expressive bare face (NO glasses!) with warm Southeast Asian skin tone & voluminous short black male hair
+    - Dark charcoal kosan shorts & 100% barefoot feet!
     """
     human = load_mpfb2_human_base(mas_dimas_blend, target_height_m=1.68)
     scene = bpy.context.scene
     arm = human["arm"]
 
-    # Clean neutral light-gray studio backdrop so Crimson Red & Black Glasses pop clearly!
+    # Clean neutral light-gray studio backdrop so Crimson Red & Voluminous Black Hair pop clearly!
     world = bpy.data.worlds.new("FrontCheck_World")
     scene.world = world
     world.use_nodes = True
@@ -623,11 +711,11 @@ def render_mas_dimas_front_check(mas_dimas_blend: Path, out_png: Path) -> Path:
     bpy.ops.mesh.primitive_plane_add(size=8.0, location=(0.0, 1.35, 2.0), rotation=(math.radians(90.0), 0.0, 0.0))
     bpy.context.active_object.data.materials.append(bg_mat)
 
-    # 3-point balanced studio lighting (rich Crimson red & natural Indonesian skin tone, zero overexposure!)
+    # 3-point balanced studio lighting (rich Crimson red & natural warm SE Asian skin tone!)
     for name, loc, rot, sz, energy, col in [
-        ("Key", (-1.05, -1.75, 2.05), (math.radians(56), 0.0, math.radians(-28)), 1.3, 125.0, (1.0, 0.96, 0.92)),
-        ("Fill", (1.25, -1.60, 1.50), (math.radians(68), 0.0, math.radians(34)), 1.6, 52.0, (0.86, 0.92, 1.0)),
-        ("Rim", (0.0, 1.15, 2.25), (math.radians(-42), 0.0, 0.0), 1.0, 130.0, (0.94, 0.97, 1.0)),
+        ("Key", (-1.05, -1.75, 2.05), (math.radians(56), 0.0, math.radians(-28)), 1.3, 130.0, (1.0, 0.96, 0.91)),
+        ("Fill", (1.25, -1.60, 1.50), (math.radians(68), 0.0, math.radians(34)), 1.6, 56.0, (0.88, 0.93, 1.0)),
+        ("Rim", (0.0, 1.15, 2.25), (math.radians(-42), 0.0, 0.0), 1.0, 145.0, (0.95, 0.97, 1.0)),
     ]:
         ld = bpy.data.lights.new(name, type="AREA")
         ld.size = sz
@@ -647,12 +735,12 @@ def render_mas_dimas_front_check(mas_dimas_blend: Path, out_png: Path) -> Path:
     set_face(human, 0.0, 24, "shock", "neutral", 0.55, jaw_extra=0.0, frame=1)
     upd()
 
-    # Full-body 9:16 framing showing top of hair, glasses, JADI APA Crimson tee, dark shorts & barefoot toes!
+    # Full-body 9:16 framing showing voluminous hair silhouette, bare expressive face, JADI APA tee, shorts & barefoot toes!
     cam_data = bpy.data.cameras.new("FrontCheck_Cam")
     cam_data.lens = 44.0
     cam_obj = bpy.data.objects.new("FrontCheck_Cam", cam_data)
-    cam_obj.location = (0.0, -2.85, 0.88)
-    aim = (Vector((0.0, 0.0, 0.86)) - cam_obj.location).normalized()
+    cam_obj.location = (0.0, -2.85, 0.90)
+    aim = (Vector((0.0, 0.0, 0.88)) - cam_obj.location).normalized()
     cam_obj.rotation_euler = aim.to_track_quat("-Z", "Y").to_euler()
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
@@ -670,7 +758,7 @@ def render_mas_dimas_front_check(mas_dimas_blend: Path, out_png: Path) -> Path:
         scene.view_settings.look = "AgX - Medium High Contrast"
     except Exception:
         pass
-    scene.view_settings.exposure = -0.35
+    scene.view_settings.exposure = -0.32
 
     out_png.parent.mkdir(parents=True, exist_ok=True)
     scene.render.filepath = str(out_png)
@@ -696,10 +784,11 @@ def load_mpfb2_human_base(
     if arm is None or body is None:
         raise RuntimeError(f"Expected MPFB2 objects Kid_rig & Kid_body inside {blend_path}")
 
-    # Strip any non-Mas-Dimas objects (e.g. if opening raw family_ready.blend)
+    # Strip any non-Mas-Dimas objects, shoes, and any legacy procedural glasses cleanly
     keep_objs = {arm}
     for ch in arm.children_recursive:
-        if "shoes" not in ch.name.lower():
+        lname = ch.name.lower()
+        if "shoes" not in lname and "glasses" not in lname:
             keep_objs.add(ch)
     for obj in list(bpy.data.objects):
         if obj not in keep_objs:
@@ -719,20 +808,17 @@ def load_mpfb2_human_base(
             pb.constraints.remove(c)
     upd()
 
-    # If opening raw family_ready.blend (no MasDimas_Glasses yet), upgrade seamlessly on the fly!
-    if bpy.data.objects.get("MasDimas_Glasses") is None:
+    # If opening raw family_ready.blend (no mas_dimas_outfit_diffuse.png yet), upgrade seamlessly on the fly!
+    if bpy.data.images.get("mas_dimas_outfit_diffuse.png") is None:
         _fix_teeth_materials()
         _polish_mas_dimas_skin_and_hair(body)
         cloth_obj = bpy.data.objects.get("Human.male_casualsuit06")
         if cloth_obj is not None:
             _apply_mas_dimas_crimson_outfit(cloth_obj, arm)
-        _add_mas_dimas_glasses(arm)
         upd()
     else:
-        # Ensure bare-foot masks stay removed
-        for mod in list(body.modifiers):
-            if mod.type == "MASK" and mod.name.startswith("Delete."):
-                body.modifiers.remove(mod)
+        # Ensure bare-foot masks stay removed & voluminous hair/warm skin are applied
+        _polish_mas_dimas_skin_and_hair(body)
 
     current_h = max(0.5, float(arm.dimensions.z))
     rig_scale = target_height_m / current_h
@@ -1077,11 +1163,12 @@ def snap_sandal_to_right_hand(
     aim_sole_dir: Optional[Vector] = None,
     blade_dir_hint: Optional[Vector] = None,
 ) -> Vector:
-    """Position & orient `sandal_jepit_swallow` in an athletic swatting heel power-grip directly from `wrist.R`.
+    """Position & orient `sandal_jepit_swallow` in a realistic horizontal-forward swatting heel grip.
 
-    - Fist firmly grips the **heel/base** (`y = -0.105`) with ZERO fingers piercing the sole.
-    - Flat green rubber striking surface (`-Z` of sandal) aims squarely along `aim_sole_dir` (toward cockroach/floor!),
-      with angled swat backswing blade orientation (`blade_dir_hint`) — NEVER held straight up like a popsicle!
+    - Fist grips ONLY the narrow heel end (`y_local = -0.118`) with fingers wrapping around the top white
+      footbed (`+Z`) — offset cleanly along `-s_z` (sole normal) so **0% of fingers pierce the green bottom sole!**
+    - Flat green rubber striking surface (`-Z` of sandal) aims squarely along `aim_sole_dir` (forward-down toward
+      the cockroach/floor, ready to slap DOWN — NEVER held upright like a ping-pong paddle or popsicle!).
     """
     arm = human["arm"]
     s = human["scale"]
@@ -1106,14 +1193,15 @@ def snap_sandal_to_right_hand(
     else:
         palm_normal = palm_normal.normalized()
 
-    grip_pt = w0 + palm_dir * (0.055 * s) + palm_normal * (0.030 * s)
+    # Anchor squarely at the finger-cup edge (slightly past palm center) so heel sits neatly inside the curled fingers
+    grip_pt = w0 + palm_dir * (0.068 * s) + palm_normal * (0.022 * s)
 
     if aim_sole_dir is not None and aim_sole_dir.length > 1e-4:
         s_z = (-aim_sole_dir).normalized()
-        b_hint = blade_dir_hint if (blade_dir_hint is not None and blade_dir_hint.length > 1e-4) else palm_dir
+        b_hint = blade_dir_hint if (blade_dir_hint is not None and blade_dir_hint.length > 1e-4) else Vector((-0.25, -0.92, -0.28))
         s_y = b_hint - s_z * b_hint.dot(s_z)
         if s_y.length < 1e-4:
-            s_y = Vector((-0.4, -0.3, 0.85)) - s_z * (Vector((-0.4, -0.3, 0.85)).dot(s_z))
+            s_y = Vector((-0.25, -0.92, -0.28)) - s_z * (Vector((-0.25, -0.92, -0.28)).dot(s_z))
         s_y = s_y.normalized()
         s_x = s_y.cross(s_z).normalized()
         s_y = s_z.cross(s_x).normalized()
@@ -1129,8 +1217,9 @@ def snap_sandal_to_right_hand(
         (s_x.z, s_y.z, s_z.z),
     ))
 
-    # Heel sits cleanly in the fist; footbed offset +0.012m prevents any knuckle/finger clipping through sole!
-    center_pos = grip_pt + s_y * 0.098 + s_z * 0.012
+    # Place narrow heel edge (`y_local = -0.118`) inside finger cup & offset `-0.017 * s_z` (along striking sole normal)
+    # so white footbed (+Z) rests flush against palm/fingers while green bottom sole (-Z) is 100% free of finger clipping!
+    center_pos = grip_pt + s_y * 0.118 - s_z * 0.017
 
     sandal_root.rotation_mode = "QUATERNION"
     sandal_root.location = center_pos
@@ -1140,6 +1229,88 @@ def snap_sandal_to_right_hand(
     return grip_pt
 
 
+def attach_sandal_to_foot_bone(
+    human: Dict[str, Any],
+    sandal_root: bpy.types.Object,
+    side: str = "L",
+) -> bpy.types.Object:
+    """Rigidly BONE-parent a green Swallow flip-flop directly onto `foot.{side}` in exact rest-pose contact!
+
+    Measures the evaluated bare-foot vertices of `Kid_body` while bare soles sit flush at `z = 0.0`,
+    places the flip-flop 100% LEVEL right beneath the bare sole (white footbed top `z_local = +0.017`
+    kissing `z = 0.0`, green rubber bottom at `z = -0.017`), aligns the V-strap snugly across the forefoot,
+    and locks it via Blender `BONE` parenting to `foot.{side}`!
+    When `foot.{side}` is lifted by `left_sole_lift = +0.018m` in `place_and_feet()`, the entire green+white
+    sandal stays 100% glued to the foot AND cleanly ABOVE the ceramic floor (`z >= +0.001m`, ZERO sinking!).
+    """
+    arm = human["arm"]
+    body = human["body"]
+    sole_z_shift = float(human["leg_ik"].get("sole_z_shift", 0.0))
+
+    # Temporarily place rig in clean rest pose with bare soles at z=0.0 & leg IK disabled for exact measurement
+    prev_loc = arm.location.copy()
+    prev_rot = arm.rotation_euler.copy()
+    P = arm.pose.bones
+    ik_prev: List[Tuple[bpy.types.Constraint, float]] = []
+    for s_tag in ("L", "R"):
+        for bname in (f"lowerleg02.{s_tag}", f"foot.{s_tag}"):
+            pb = P.get(bname)
+            if pb:
+                for c in pb.constraints:
+                    ik_prev.append((c, c.influence))
+                    c.influence = 0.0
+    reset_pose(human)
+    arm.location = (0.0, 0.0, sole_z_shift)
+    arm.rotation_euler = (0.0, 0.0, 0.0)
+    upd()
+
+    dg = bpy.context.evaluated_depsgraph_get()
+    be = body.evaluated_get(dg)
+    side_sign = 1.0 if side == "L" else -1.0
+    foot_verts = [
+        body.matrix_world @ v.co
+        for v in be.data.vertices
+        if (body.matrix_world @ v.co).z < 0.045 and (body.matrix_world @ v.co).x * side_sign > 0.01
+    ]
+    if foot_verts:
+        fx_center = (min(v.x for v in foot_verts) + max(v.x for v in foot_verts)) * 0.5
+        fy_toe = min(v.y for v in foot_verts)   # -Y is front (toes)
+        fy_heel = max(v.y for v in foot_verts)  # +Y is back (heel)
+        fz_sole = min(v.z for v in foot_verts)  # ~0.000m
+        # Align sandal center so toe-tip (+0.137 along -Y) extends ~1.2cm past bare toes & V-strap hugs forefoot!
+        fy_center = (fy_toe + fy_heel) * 0.50 - 0.006
+    else:
+        fb = P[f"foot.{side}"]
+        aw = wp(arm, fb.head)
+        fx_center, fy_center, fz_sole = aw.x, aw.y - 0.055, 0.0
+
+    # Place sandal 100% LEVEL facing -Y (rot_z = 180°), white footbed (+0.017) flush against bare sole!
+    sandal_root.parent = None
+    sandal_root.rotation_mode = "XYZ"
+    sandal_root.location = (fx_center, fy_center, fz_sole - 0.017)
+    sandal_root.rotation_euler = (0.0, 0.0, math.pi)
+    upd()
+
+    # Rigidly BONE-parent to `foot.{side}` while preserving exact world-space rest alignment!
+    fb = P[f"foot.{side}"]
+    world_sandal_mat = sandal_root.matrix_world.copy()
+    bone_tail_mat = arm.matrix_world @ Matrix.Translation(fb.tail) @ fb.matrix.to_3x3().to_4x4()
+    sandal_root.parent = arm
+    sandal_root.parent_type = "BONE"
+    sandal_root.parent_bone = f"foot.{side}"
+    sandal_root.matrix_parent_inverse = bone_tail_mat.inverted()
+    sandal_root.matrix_world = world_sandal_mat
+    upd()
+
+    # Restore Leg IK influences & previous arm transform
+    for c, inf in ik_prev:
+        c.influence = inf
+    arm.location = prev_loc
+    arm.rotation_euler = prev_rot
+    upd()
+    return sandal_root
+
+
 def snap_sandal_to_foot(
     human: Dict[str, Any],
     sandal_root: bpy.types.Object,
@@ -1147,10 +1318,9 @@ def snap_sandal_to_foot(
     frame: int,
     floor_clamp: bool = True,
 ) -> Vector:
-    """Snap a green Swallow flip-flop snugly UNDER Mas Dimas's LEFT (`'L'`) or RIGHT (`'R'`) foot!
+    """Snap a green Swallow flip-flop 100% LEVEL & ABOVE FLOOR (`z >= 0.001m`) under `foot.{side}`!
 
-    Aligns sandal `+Y` (heel -> toe) directly along `foot.{side}` -> `toe1-1.{side}` and keeps
-    the green sole (`z=0` local) flush beneath his bare sole (clamped `>= 0.0` when standing on floor!).
+    Horizontalizes the foot forward vector so the sole NEVER pitches nose-down into the ceramic floor.
     """
     arm = human["arm"]
     s = human["scale"]
@@ -1163,18 +1333,13 @@ def snap_sandal_to_foot(
     ball_w = wp(arm, fb.tail)
     toe_w = wp(arm, tb.tail) if tb else (ball_w + (ball_w - ankle_w) * 0.5)
 
-    # Forward direction along foot from heel to toes
-    foot_fwd = toe_w - ankle_w
-    if foot_fwd.length < 1e-4:
-        foot_fwd, _ = body_frame(arm)
-    # Use foot bone horizontal pitch while keeping sole level laterally
-    s_y = foot_fwd.normalized()
-    up_ref = Vector((0.0, 0.0, 1.0))
-    s_x = s_y.cross(up_ref)
-    if s_x.length < 1e-4:
-        s_x = Vector((1.0, 0.0, 0.0))
-    s_x = s_x.normalized()
-    s_z = s_x.cross(s_y).normalized()
+    # Strictly horizontal forward direction along foot -> sole stays 100% level on ceramic floor!
+    foot_fwd_h = Vector((toe_w.x - ankle_w.x, toe_w.y - ankle_w.y, 0.0))
+    if foot_fwd_h.length < 1e-4:
+        foot_fwd_h, _ = body_frame(arm)
+    s_y = foot_fwd_h.normalized()
+    s_z = Vector((0.0, 0.0, 1.0))
+    s_x = s_y.cross(s_z).normalized()
 
     basis = Matrix((
         (s_x.x, s_y.x, s_z.x),
@@ -1182,14 +1347,11 @@ def snap_sandal_to_foot(
         (s_x.z, s_y.z, s_z.z),
     ))
 
-    # Position sandal root (z=0.0 is bottom of green rubber sole, z=0.017 is white footbed top!)
-    # Center between ankle & toe along s_y so V-strap hugs snugly across forefoot!
-    mid_pt = ankle_w * 0.34 + toe_w * 0.66
-    # Foot bottom sits ~0.048 * s below ankle joint; place sandal sole bottom 0.017m below foot bottom
-    foot_bot_z = min(ankle_w.z - 0.047 * s, ball_w.z - 0.022 * s, toe_w.z - 0.014 * s)
-    sole_z = foot_bot_z - 0.015
+    mid_pt = ankle_w * 0.36 + toe_w * 0.64
+    foot_bot_z = min(ankle_w.z - 0.048 * s, ball_w.z - 0.022 * s, toe_w.z - 0.015 * s)
+    sole_z = foot_bot_z - 0.017
     if floor_clamp:
-        sole_z = max(0.0, sole_z)
+        sole_z = max(0.001, sole_z)
 
     pos = Vector((mid_pt.x, mid_pt.y, sole_z))
     sandal_root.rotation_mode = "QUATERNION"
