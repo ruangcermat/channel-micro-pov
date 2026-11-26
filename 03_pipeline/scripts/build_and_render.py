@@ -95,6 +95,7 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
         scene.cycles.glossy_bounces = 2
         scene.cycles.transmission_bounces = 2
         scene.cycles.transparent_max_bounces = 4
+        est_sec_per_frame = "0.4-0.8s (GPU)" if has_gpu else "6-12s (CPU)"
     elif mode == "preview":
         scene.render.resolution_x = 540
         scene.render.resolution_y = 960
@@ -105,16 +106,18 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
         scene.cycles.glossy_bounces = 2
         scene.cycles.transmission_bounces = 2
         scene.cycles.transparent_max_bounces = 4
+        est_sec_per_frame = "0.6-1.2s (T4 OptiX/CUDA)"
     else:
         scene.render.resolution_x = 1080
         scene.render.resolution_y = 1920
-        scene.cycles.samples = 32
-        scene.cycles.adaptive_threshold = 0.025
-        scene.cycles.max_bounces = 6
-        scene.cycles.diffuse_bounces = 3
-        scene.cycles.glossy_bounces = 3
-        scene.cycles.transmission_bounces = 4
-        scene.cycles.transparent_max_bounces = 6
+        scene.cycles.samples = 24
+        scene.cycles.adaptive_threshold = 0.06
+        scene.cycles.max_bounces = 4
+        scene.cycles.diffuse_bounces = 2
+        scene.cycles.glossy_bounces = 2
+        scene.cycles.transmission_bounces = 2
+        scene.cycles.transparent_max_bounces = 4
+        est_sec_per_frame = "1.8-3.5s (T4 OptiX/CUDA)"
 
     scene.render.resolution_percentage = 100
     scene.cycles.use_adaptive_sampling = True
@@ -132,7 +135,7 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
     scene.render.image_settings.color_mode = "RGB"
     scene.render.image_settings.compression = 15
 
-    # Punchy high-contrast color management
+    # AgX Medium High Contrast color management with controlled -0.55 exposure (no white blowout)
     try:
         scene.view_settings.view_transform = "AgX"
         scene.view_settings.look = "AgX - Medium High Contrast"
@@ -142,21 +145,21 @@ def configure_cycles_render(scene: bpy.types.Scene, mode: str, fps: int) -> None
             scene.view_settings.look = "Medium High Contrast"
         except Exception:
             pass
-    scene.view_settings.exposure = -0.35
+    scene.view_settings.exposure = -0.55
 
     log(
         "BLENDER",
         f"Cycles configured | Mode: {mode} ({scene.render.resolution_x}x{scene.render.resolution_y}, "
-        f"{scene.cycles.samples} samples, {fps}fps) | Device: {device_used} | OIDN: ON",
+        f"{scene.cycles.samples} samples, {fps}fps) | Device: {device_used} | OIDN: ON | Est: {est_sec_per_frame}/frame",
     )
 
 
 # =============================================================================
-# WORLD HDRI & LIGHTING RIG
+# WORLD HDRI & LIGHTING RIG ("JAM 2 PAGI" HIGH-CONTRAST CINEMATIC)
 # =============================================================================
 
 def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str, Any]:
-    """Configure Poly Haven HDRI world + night moonlight fill + overhead fluorescent neon + cyan accent."""
+    """Configure very dim night-blue HDRI + crisp overhead/back neon + boss rim light."""
     world = bpy.data.worlds.new("MicroPOV_World")
     scene.world = world
     world.use_nodes = True
@@ -176,24 +179,24 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
     if hdri_path.exists():
         env = nt.nodes.new("ShaderNodeTexEnvironment")
         env.image = bpy.data.images.load(str(hdri_path), check_existing=True)
-        # Tint HDRI slightly so night scenes stay moody blue and neon scenes crisp
+        # Deep 2 AM night-blue tint so ambient fill stays moody & dark
         mix = nt.nodes.new("ShaderNodeMix")
         mix.data_type = "RGBA"
         mix.blend_type = "MULTIPLY"
-        mix.inputs[0].default_value = 0.65
+        mix.inputs[0].default_value = 0.85
         sock_a = next(i for i in mix.inputs if i.name == "A" and i.type == "RGBA")
         sock_b = next(i for i in mix.inputs if i.name == "B" and i.type == "RGBA")
         sock_out = next(o for o in mix.outputs if o.name == "Result" and o.type == "RGBA")
-        sock_b.default_value = (0.55, 0.72, 1.0, 1.0)
+        sock_b.default_value = (0.16, 0.28, 0.55, 1.0)
         nt.links.new(env.outputs["Color"], sock_a)
         nt.links.new(sock_out, bg.inputs["Color"])
         world_tint = sock_b
-        log("BLENDER", f"Loaded cached Poly Haven HDRI: {hdri_path.name}")
+        log("BLENDER", f"Loaded cached Poly Haven HDRI (night tint): {hdri_path.name}")
     else:
-        bg.inputs["Color"].default_value = (0.04, 0.08, 0.18, 1.0)
+        bg.inputs["Color"].default_value = (0.02, 0.04, 0.12, 1.0)
         world_tint = bg.inputs["Color"]
 
-    bg.inputs["Strength"].default_value = 0.18
+    bg.inputs["Strength"].default_value = 0.06
 
     def _add_area_light(name: str, loc, rot, size, size_y, energy, color):
         ld = bpy.data.lights.new(name=name, type="AREA")
@@ -208,33 +211,33 @@ def setup_world_and_lights(scene: bpy.types.Scene, assets_dir: Path) -> Dict[str
         scene.collection.objects.link(lo)
         return lo, ld
 
-    # 1. Dim blue 2 AM kitchen moonlight (Scene 1 pre-switch)
+    # 1. Dim blue 2 AM window/fridge rim light (Scene 1 pre-switch 0-1.0s)
     night_obj, night_data = _add_area_light(
-        "Light_Night_Blue", (0.8, 0.2, 1.8), (math.radians(35), math.radians(25), 0.0), 1.2, 1.2, 14.0, (0.22, 0.45, 1.0)
+        "Light_Night_Blue", (0.95, 0.85, 1.45), (math.radians(52), math.radians(40), 0.0), 0.7, 1.1, 7.5, (0.14, 0.35, 1.0)
     )
 
-    # 2. Blinding white overhead Indonesian TL Fluorescent Neon (flashes ON at Scene 1 t=1.0s!)
+    # 2. Overhead TL Fluorescent Neon positioned behind human's plane (y=2.15) for sharp shadows & dark boss face!
     neon_obj, neon_data = _add_area_light(
-        "Light_Neon_Main", (0.0, 1.55, 2.55), (0.0, 0.0, 0.0), 0.22, 1.25, 0.0, (0.93, 0.97, 1.0)
+        "Light_Neon_Main", (0.0, 2.15, 2.55), (math.radians(10), 0.0, 0.0), 0.14, 0.95, 0.0, (0.92, 0.96, 1.0)
     )
 
-    # 3. Dramatic Boss Backlight behind human head (Scene 2 silhouette rim light!)
+    # 3. Dramatic Boss Backlight behind human head (rim silhouette)
     rim_obj, rim_data = _add_area_light(
-        "Light_Boss_Backlight", (0.0, 2.15, 2.15), (math.radians(-42), 0.0, 0.0), 0.9, 0.9, 0.0, (0.90, 0.96, 1.0)
+        "Light_Boss_Backlight", (0.0, 2.60, 2.10), (math.radians(-48), 0.0, 0.0), 0.75, 0.75, 0.0, (0.85, 0.94, 1.0)
     )
 
     # 4. Cyan Cheat-Code Accent Light (Scene 3 bullet time)
     cyan_data = bpy.data.lights.new(name="Light_Cyan_Accent", type="POINT")
     cyan_data.energy = 0.0
     cyan_data.color = (0.05, 0.92, 1.0)
-    cyan_data.shadow_soft_size = 0.15
+    cyan_data.shadow_soft_size = 0.12
     cyan_obj = bpy.data.objects.new("Light_Cyan_Accent", cyan_data)
     cyan_obj.location = (0.0, 0.60, 0.22)
     scene.collection.objects.link(cyan_obj)
 
-    # 5. Soft fill bounce near floor so cockroach POV props remain punchy & readable
+    # 5. Subtle floor bounce (very low 1.2W so shadows stay deep & contrasty)
     fill_obj, fill_data = _add_area_light(
-        "Light_Floor_Fill", (0.4, -0.4, 0.9), (math.radians(55), 0.0, math.radians(-20)), 0.8, 0.8, 4.0, (0.95, 0.95, 1.0)
+        "Light_Floor_Fill", (0.4, -0.4, 0.9), (math.radians(55), 0.0, math.radians(-20)), 0.8, 0.8, 1.2, (0.85, 0.90, 1.0)
     )
 
     return {
@@ -403,14 +406,34 @@ def build_ep001_animation(
     wind = props.build_wind_lines((0.0, 0.65, 0.14))
     dust = props.build_dust_puff((0.0, 0.45, 0.01))
 
-    # 3. Setup POV Camera + Foreground Cockroach Antennae/Wings + Speed Lines
+    # 3. Setup POV Camera with Macro DOF + Foreground Cockroach Antennae/Wings + Speed Lines
     cam_data = bpy.data.cameras.new("MicroPOV_Camera")
     cam_data.clip_start = 0.005  # Critical for 1.5cm cockroach macro scale!
     cam_data.clip_end = 40.0
     cam_data.sensor_fit = "VERTICAL"
+    cam_data.dof.use_dof = True
+    cam_data.dof.aperture_fstop = 3.2
+    cam_data.dof.focus_distance = 0.25
     cam_obj = bpy.data.objects.new("MicroPOV_Camera", cam_data)
     scene.collection.objects.link(cam_obj)
     scene.camera = cam_obj
+
+    def _kf_dof(frame: int, dist_m: float) -> None:
+        cam_data.dof.focus_distance = max(0.05, dist_m)
+        cam_data.dof.keyframe_insert(data_path="focus_distance", frame=frame)
+
+    # Parent Sandal Jepit directly to Human Right Hand Socket via CHILD_OF constraint
+    # so sandal is genuinely gripped in Scenes 1, 2, 3, 6, 7 and never floats in mid-air!
+    from mathutils import Matrix
+    sandal_grip = sandal["root"].constraints.new("CHILD_OF")
+    sandal_grip.name = "Grip_In_RightHand"
+    sandal_grip.target = human["sandal_socket"]
+    sandal_grip.inverse_matrix = Matrix.Identity(4)
+    sandal_grip.influence = 1.0
+
+    def _kf_grip(frame: int, influence: float) -> None:
+        sandal_grip.influence = influence
+        sandal_grip.keyframe_insert(data_path="influence", frame=frame)
 
     ant_rig = props.build_cockroach_antennae_rig(cam_obj)
     speed_rig = props.build_speed_lines_rig(cam_obj)
@@ -429,7 +452,6 @@ def build_ep001_animation(
     # Map scene_id -> timing metadata
     tmap: Dict[int, Dict[str, Any]] = {int(s["scene_id"]): s for s in manifest["scenes"]}
 
-    # Helper to convert scene-local seconds to absolute frame number
     def f_at(sid: int, local_sec: float) -> int:
         s = tmap[sid]
         return max(s["start_frame"], min(s["end_frame"], s["start_frame"] + int(round(local_sec * fps))))
@@ -447,56 +469,56 @@ def build_ep001_animation(
     _kf_hide(black_shutter, 1, True)
 
     # =========================================================================
-    # SCENE 1: JAM 2 PAGI — Gelap biru -> Flash neon putih -> Antennae kaku!
+    # SCENE 1: JAM 2 PAGI — Gelap biru (0-1.0s) -> Flash neon overhead -> Antennae kaku!
     # =========================================================================
     if 1 in tmap:
         s1 = tmap[1]
         f0, f_end = s1["start_frame"], s1["end_frame"]
         f_flash = f_at(1, 1.05)
 
-        # Low static POV looking slightly down at glowing Indomie kuah spill (also shows human/sandal far silhouette!)
         _kf_loc_rot(cam_obj, f0, (0.0, -0.02, cam_h), (82.0, 0.0, 0.0))
         _kf_fov(cam_data, f0, base_fov)
+        _kf_dof(f0, 0.22)  # Focus on Indomie spill
         _kf_loc_rot(cam_obj, f_flash - 2, (0.0, 0.0, cam_h), (83.0, 0.0, 0.0))
 
         # Startled jolt upward when blinding neon clicks ON!
         _kf_loc_rot(cam_obj, f_flash + 4, (0.0, -0.01, cam_h + 0.008), (104.0, 3.0, -2.0))
         _kf_loc_rot(cam_obj, f_end, (0.0, -0.01, cam_h + 0.006), (108.0, 0.0, 0.0))
         _kf_fov(cam_data, f_end, base_fov)
+        _kf_dof(f_end, 1.20)
 
-        # Lighting: Dim night blue -> sudden neon flash blast!
-        _kf_light(lights["night_light"], f0, 14.0)
+        # Dramatic 2 AM blue darkness -> sharp overhead neon flash
+        _kf_light(lights["night_light"], f0, 7.5)
         _kf_light(lights["neon_light"], f0, 0.0)
         _kf_light(lights["neon_light"], f_flash - 1, 0.0)
-        _set_neon_emission(env["neon_mat"], f0, 0.1)
-        _set_neon_emission(env["neon_mat"], f_flash - 1, 0.1)
-        lights["world_bg"].inputs["Strength"].default_value = 0.16
+        _set_neon_emission(env["neon_mat"], f0, 0.05)
+        _set_neon_emission(env["neon_mat"], f_flash - 1, 0.05)
+        lights["world_bg"].inputs["Strength"].default_value = 0.05
         lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f0)
         lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f_flash - 1)
 
-        # Flash peak + settle to bright stark fluorescent kitchen light
-        _kf_light(lights["night_light"], f_flash + 1, 1.5)
-        _kf_light(lights["neon_light"], f_flash + 1, 260.0)
-        _kf_light(lights["neon_light"], f_flash + 7, 135.0)
-        _set_neon_emission(env["neon_mat"], f_flash + 1, 22.0)
-        lights["world_bg"].inputs["Strength"].default_value = 0.28
+        _kf_light(lights["night_light"], f_flash + 1, 0.8)
+        _kf_light(lights["neon_light"], f_flash + 1, 185.0)
+        _kf_light(lights["neon_light"], f_flash + 7, 110.0)
+        _set_neon_emission(env["neon_mat"], f_flash + 1, 16.0)
+        lights["world_bg"].inputs["Strength"].default_value = 0.08
         lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=f_flash + 1)
 
-        # Human stands menacingly ahead, sandal held low at start then starts lifting
+        # Human stands ahead gripping sandal in right hand (no floating!)
+        _kf_grip(f0, 1.0)
+        _kf_loc_rot(sandal["root"], f0, (0.0, 0.02, -0.02), (90.0, 0.0, 0.0))
         _kf_loc_rot(human["root"], f0, (0.02, 1.32, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["left_leg"], f0, (0.12, 0.0, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (15.0, 0.0, 0.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.28, 1.02, 0.72), (82.0, 10.0, -15.0))
-        _kf_loc_rot(sandal["root"], f_end, (-0.26, 0.96, 1.25), (125.0, 8.0, -10.0))
+        _kf_loc_rot(human["left_leg"], f0, (0.11, 0.0, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (18.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.23, 0.0, 1.39), (88.0, 0.0, 6.0))
 
-        # Relaxed swaying antennae -> sudden rigid upright shock!
         for fr in range(f0, f_flash, 4):
             _set_antennae_pose(ant_rig, fr, -8.0, 6.0, jitter=4.0)
         _set_antennae_pose(ant_rig, f_flash + 2, 26.0, -8.0, jitter=1.0)
         _set_antennae_pose(ant_rig, f_end, 24.0, -6.0, jitter=1.5)
 
     # =========================================================================
-    # SCENE 2: BOSS TERAKHIR — Low-angle extreme tilt up + stepped punch-in zoom
+    # SCENE 2: BOSS TERAKHIR — Low-angle extreme tilt up + backlit silhouette
     # =========================================================================
     if 2 in tmap:
         s2 = tmap[2]
@@ -504,11 +526,10 @@ def build_ep001_animation(
         f_mid1 = f_frac(2, 0.35)
         f_mid2 = f_frac(2, 0.68)
 
-        # Extreme upward tilt from floor staring up at towering human & raised green Swallow sandal!
         _kf_loc_rot(cam_obj, f0, (0.0, 0.08, cam_h), (126.0, 0.0, 6.0))
         _kf_fov(cam_data, f0, 92.0)
+        _kf_dof(f0, 1.55)
 
-        # Snappy stepped action-trailer zoom punches toward the raised sandal
         _kf_loc_rot(cam_obj, f_mid1, (-0.01, 0.12, cam_h), (138.0, -2.5, 10.0))
         _kf_fov(cam_data, f_mid1, 72.0)
 
@@ -517,49 +538,48 @@ def build_ep001_animation(
 
         _kf_loc_rot(cam_obj, f_end, (-0.02, 0.15, cam_h), (146.0, 0.0, 11.0))
         _kf_fov(cam_data, f_end, 54.0)
+        _kf_dof(f_end, 1.65)
 
-        # Backlight boss silhouette glow
-        _kf_light(lights["rim_light"], f0, 420.0)
-        _kf_light(lights["neon_light"], f0, 230.0)
+        # Backlight boss silhouette glow (keeps human face dark & dramatic!)
+        _kf_light(lights["rim_light"], f0, 320.0)
+        _kf_light(lights["neon_light"], f0, 115.0)
 
-        # Human raises right arm high with Swallow sandal poised overhead!
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (150.0, 0.0, 10.0))
-        _kf_loc_rot(human["right_arm"], f_end, (-0.26, 0.0, 1.38), (168.0, 0.0, 8.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.24, 0.92, 1.72), (148.0, 12.0, -8.0))
-        _kf_loc_rot(sandal["root"], f_end, (-0.22, 0.88, 1.88), (156.0, 15.0, -6.0))
+        _kf_grip(f0, 1.0)
+        _kf_loc_rot(sandal["root"], f0, (0.0, 0.02, -0.02), (90.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (148.0, 0.0, 8.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.23, 0.0, 1.39), (168.0, 0.0, 6.0))
 
         for fr in range(f0, f_end + 1, 5):
             _set_antennae_pose(ant_rig, fr, 22.0, -4.0, jitter=5.0)
 
     # =========================================================================
-    # SCENE 3: CHEAT CODE AKTIF — Bullet-time slow-mo + glowing cyan wind lines!
+    # SCENE 3: CHEAT CODE AKTIF — Bullet-time slow-mo + subtle cyan wind lines
     # =========================================================================
     if 3 in tmap:
         s3 = tmap[3]
         f0, f_end = s3["start_frame"], s3["end_frame"]
         f_wind_start = f_frac(3, 0.25)
 
-        # Dramatic Dutch-tilt slow-mo staring at sandal beginning its descent
         _kf_loc_rot(cam_obj, f0, (0.0, 0.16, cam_h), (124.0, 9.0, 6.0))
         _kf_fov(cam_data, f0, 82.0)
+        _kf_dof(f0, 0.95)
         _kf_loc_rot(cam_obj, f_end, (0.03, 0.20, cam_h), (118.0, 13.0, 2.0))
         _kf_fov(cam_data, f_end, 94.0)
+        _kf_dof(f_end, 0.65)
 
-        # Cyan accent glow + wind-wave ribbons streaming from sandal down toward camera
-        _kf_light(lights["cyan_light"], f0, 18.0)
-        _kf_light(lights["cyan_light"], f_wind_start, 55.0)
-        _kf_light(lights["cyan_light"], f_end, 65.0)
-        _kf_light(lights["rim_light"], f0, 180.0)
+        _kf_light(lights["cyan_light"], f0, 10.0)
+        _kf_light(lights["cyan_light"], f_wind_start, 28.0)
+        _kf_light(lights["cyan_light"], f_end, 34.0)
+        _kf_light(lights["rim_light"], f0, 160.0)
 
         _kf_hide(wind["root"], f0, False)
-        _kf_loc_rot(wind["root"], f0, (-0.12, 0.78, 0.62), (24.0, 0.0, 8.0), scale=(0.6, 0.6, 0.6))
-        _kf_loc_rot(wind["root"], f_end, (-0.02, 0.36, 0.16), (12.0, 0.0, 2.0), scale=(1.15, 1.35, 1.15))
+        _kf_loc_rot(wind["root"], f0, (-0.10, 0.78, 0.62), (24.0, 0.0, 8.0), scale=(0.6, 0.6, 0.6))
+        _kf_loc_rot(wind["root"], f_end, (-0.02, 0.36, 0.16), (12.0, 0.0, 2.0), scale=(1.1, 1.25, 1.1))
 
-        # Slow-motion sandal arc descending from overhead toward floor
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (165.0, 0.0, 8.0))
-        _kf_loc_rot(human["right_arm"], f_end, (-0.26, 0.0, 1.38), (95.0, 0.0, 5.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.20, 0.85, 1.78), (155.0, 12.0, -6.0))
-        _kf_loc_rot(sandal["root"], f_end, (-0.06, 0.50, 0.56), (174.0, 4.0, -3.0))
+        # Slow-motion downward swing with sandal locked in right hand
+        _kf_grip(f0, 1.0)
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (165.0, 0.0, 6.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.23, 0.0, 1.39), (92.0, 0.0, 4.0))
 
         for fr in range(f0, f_end + 1, 3):
             _set_antennae_pose(ant_rig, fr, 14.0, 10.0, jitter=8.5)
@@ -570,38 +590,34 @@ def build_ep001_animation(
     if 4 in tmap:
         s4 = tmap[4]
         f0, f_end = s4["start_frame"], s4["end_frame"]
-        f_slam = f_at(4, 0.45)
+        f_slam = f_at(4, 0.42)
 
-        # Hide Scene 3 wind lines & cyan light
         _kf_hide(wind["root"], f0, True)
         _kf_light(lights["cyan_light"], f0, 0.0)
-        _kf_light(lights["neon_light"], f0, 310.0)
+        _kf_light(lights["neon_light"], f0, 130.0)
 
-        # Sandal SLAMS hard onto floor right where cockroach was!
+        # Release grip right as sandal slams onto floor in world space
+        _kf_grip(f0, 0.0)
         _kf_loc_rot(sandal["root"], f0, (-0.04, 0.44, 0.45), (176.0, 2.0, 0.0))
         _kf_loc_rot(sandal["root"], f_slam, (0.0, 0.34, 0.017), (180.0, 0.0, 0.0))
         _kf_loc_rot(sandal["root"], f_end, (0.0, 0.34, 0.017), (180.0, 0.0, 0.0))
-        _kf_loc_rot(human["right_arm"], f_slam, (-0.26, 0.0, 1.38), (22.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f_slam, (-0.23, 0.0, 1.39), (22.0, 0.0, 0.0))
 
-        # Dust puff bursts outward on sandal slam!
         _kf_hide(dust["root"], f0, True)
         _kf_hide(dust["root"], f_slam, False)
         _kf_loc_rot(dust["root"], f_slam, (0.0, 0.36, 0.015), scale=(0.25, 0.25, 0.25))
-        _kf_loc_rot(dust["root"], min(f_end, f_slam + 14), (0.0, 0.36, 0.025), scale=(2.3, 2.3, 1.5))
-        _kf_hide(dust["root"], min(f_end, f_slam + 22), True)
+        _kf_loc_rot(dust["root"], min(f_end, f_slam + 12), (0.0, 0.36, 0.025), scale=(2.2, 2.2, 1.4))
+        _kf_hide(dust["root"], min(f_end, f_slam + 18), True)
 
-        # Enable subtle sprint speed-lines around camera edges!
         _kf_hide(speed_rig["root"], f0, True)
         _kf_hide(speed_rig["root"], f_slam + 2, False)
 
-        # Widen FOV to 112° and SPRINT past human along tile grout toward fridge!
         _kf_fov(cam_data, f0, 98.0)
         _kf_fov(cam_data, f_slam + 5, 112.0)
         _kf_fov(cam_data, f_end, 112.0)
+        _kf_dof(f0, 0.85)
 
-        # Procedural high-frequency cockroach sprint shake along tile grout lines (y: 0.42 -> 1.92)
         for fr in range(f0, f_end + 1, 2):
-            u = (fr - f0) / max(1, (f_end - f0))
             if fr < f_slam:
                 cy = _lerp(0.24, 0.42, (fr - f0) / max(1, f_slam - f0))
                 cx = -0.02
@@ -609,9 +625,8 @@ def build_ep001_animation(
             else:
                 su = (fr - f_slam) / max(1, (f_end - f_slam))
                 cy = _lerp(0.45, 1.85, su)
-                # Swerve slightly left around human's legs along grout line x ~ -0.14
                 cx = -0.14 * math.sin(min(1.0, su * 1.4) * math.pi * 0.5) + 0.012 * math.sin(fr * 1.6)
-                shake_r = 2.8
+                shake_r = 2.6
             cz = cam_h + 0.003 * abs(math.sin(fr * 1.8))
             pitch = 91.5 + 1.4 * math.sin(fr * 2.1)
             roll = shake_r * math.sin(fr * 1.5)
@@ -619,32 +634,30 @@ def build_ep001_animation(
             _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, yaw))
             _set_antennae_pose(ant_rig, fr, -14.0, 20.0, jitter=11.0)
 
-        # Human pivots slightly toward fridge after missing
         _kf_loc_rot(human["root"], f_end, (0.04, 1.75, 0.0), (0.0, 0.0, 170.0))
 
     # =========================================================================
-    # SCENE 5: TINGGAL SEJENGKAL — Sprint toward dark fridge under-gap -> GIANT FOOT STOMPS!
+    # SCENE 5: TINGGAL SEJENGKAL — Sprint toward dark fridge under-gap -> FOOT STOMPS!
     # =========================================================================
     if 5 in tmap:
         s5 = tmap[5]
         f0, f_end = s5["start_frame"], s5["end_frame"]
-        f_stomp_start = f_at(5, max(1.8, s5["scene_duration_sec"] - 1.15))
-        f_stomp_land = f_at(5, max(2.2, s5["scene_duration_sec"] - 0.55))
+        f_stomp_start = f_at(5, max(1.6, s5["scene_duration_sec"] - 1.10))
+        f_stomp_land = f_at(5, max(2.0, s5["scene_duration_sec"] - 0.50))
 
         _kf_hide(speed_rig["root"], f0, False)
         _kf_hide(speed_rig["root"], f_stomp_land, True)
         _kf_fov(cam_data, f0, 106.0)
         _kf_fov(cam_data, f_end, 96.0)
+        _kf_dof(f0, 0.90)
+        _kf_dof(f_end, 0.55)
 
-        # Position human standing right near the fridge gap so left foot stomps straight into path!
         _kf_loc_rot(human["root"], f0, (0.14, 2.38, 0.0), (0.0, 0.0, 25.0))
-        # Left foot lifted high out of frame, then STOMPS squarely onto x=-0.12, y=2.52 blocking fridge gap!
         _kf_loc_rot(human["left_leg"], f0, (-0.22, 0.25, 0.42), (-18.0, 0.0, 0.0))
         _kf_loc_rot(human["left_leg"], f_stomp_start, (-0.22, 0.16, 0.36), (-12.0, 0.0, 0.0))
         _kf_loc_rot(human["left_leg"], f_stomp_land, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
         _kf_loc_rot(human["left_leg"], f_end, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
 
-        # Camera sprints straight toward dark 5.5cm fridge gap (y: 1.85 -> 2.26)
         for fr in range(f0, f_end + 1, 2):
             u = (fr - f0) / max(1, (f_end - f0))
             cy = _lerp(1.86, 2.24, min(1.0, u * 1.05))
@@ -655,12 +668,11 @@ def build_ep001_animation(
             _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, 0.0))
             _set_antennae_pose(ant_rig, fr, -8.0 if fr < f_stomp_land else 22.0, 14.0, jitter=9.0)
 
-        # Shadow darkens dramatically as foot falls in front of light!
-        _kf_light(lights["neon_light"], f0, 310.0)
-        _kf_light(lights["neon_light"], f_stomp_land, 210.0)
+        _kf_light(lights["neon_light"], f0, 120.0)
+        _kf_light(lights["neon_light"], f_stomp_land, 95.0)
 
     # =========================================================================
-    # SCENE 6: TERKEPUNG! — Hard brake + Whip-pan Left (wall), Right (box), Up (sandal!)
+    # SCENE 6: TERKEPUNG! — Hard brake + Whip-pan Left, Right, Up (sandal in hand!)
     # =========================================================================
     if 6 in tmap:
         s6 = tmap[6]
@@ -675,25 +687,24 @@ def build_ep001_animation(
         _kf_hide(speed_rig["root"], f0, True)
         _kf_fov(cam_data, f0, 96.0)
         _kf_fov(cam_data, f_up_in, 102.0)
-        _kf_light(lights["neon_light"], f0, 330.0)
+        _kf_dof(f0, 0.45)
+        _kf_dof(f_up_in, 0.75)
+        _kf_light(lights["neon_light"], f0, 125.0)
 
-        # Human foot firmly blocking fridge gap; sandal raised directly overhead again!
+        # Sandal locked back in right hand overhead!
+        _kf_grip(f0, 1.0)
+        _kf_loc_rot(sandal["root"], f0, (0.0, 0.02, -0.02), (90.0, 0.0, 0.0))
         _kf_loc_rot(human["root"], f0, (0.14, 2.38, 0.0), (0.0, 0.0, 22.0))
         _kf_loc_rot(human["left_leg"], f0, (-0.24, 0.04, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (158.0, 0.0, 5.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.10, 2.15, 0.85), (175.0, 8.0, 10.0))
-        _kf_loc_rot(sandal["root"], f_end, (-0.11, 2.12, 0.52), (178.0, 5.0, 6.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (154.0, 0.0, 5.0))
+        _kf_loc_rot(human["right_arm"], f_end, (-0.23, 0.0, 1.39), (138.0, 0.0, 4.0))
 
-        # 1. Hard screeching brake facing giant blocking foot
         _kf_loc_rot(cam_obj, f0, (-0.12, 2.24, cam_h), (95.0, 0.0, 0.0))
         _kf_loc_rot(cam_obj, f_brake, (-0.12, 2.18, cam_h + 0.004), (98.0, -4.0, 0.0))
-        # 2. Whip-pan LEFT (kosan kitchen wall!)
         _kf_loc_rot(cam_obj, f_left_in, (-0.12, 2.18, cam_h), (93.0, 5.0, 78.0))
         _kf_loc_rot(cam_obj, f_left_hold, (-0.12, 2.18, cam_h), (93.0, 3.0, 80.0))
-        # 3. Whip-pan RIGHT (cardboard box / cabinet dead-end!)
         _kf_loc_rot(cam_obj, f_right_in, (-0.12, 2.18, cam_h), (93.0, -5.0, -76.0))
         _kf_loc_rot(cam_obj, f_right_hold, (-0.12, 2.18, cam_h), (93.0, -3.0, -74.0))
-        # 4. Whip-pan STRAIGHT UP (giant green Swallow flip-flop ready to crush!)
         _kf_loc_rot(cam_obj, f_up_in, (-0.12, 2.18, cam_h), (162.0, 4.0, -8.0))
         _kf_loc_rot(cam_obj, f_end, (-0.12, 2.18, cam_h), (168.0, -3.0, -4.0))
 
@@ -701,32 +712,33 @@ def build_ep001_animation(
             _set_antennae_pose(ant_rig, fr, 26.0, 18.0, jitter=14.0)
 
     # =========================================================================
-    # SCENE 7: MODE TERBANG — Translucent wings snap open + wobbly zig-zag takeoff!
+    # SCENE 7: MODE TERBANG — Translucent amber wings at bottom corners + wobbly takeoff
     # =========================================================================
     if 7 in tmap:
         s7 = tmap[7]
         f0, f_end = s7["start_frame"], s7["end_frame"]
-        f_wings = f_at(7, 1.45)
+        f_wings = f_at(7, 1.35)
 
-        # Wings snap open & buzz wildly at screen edges!
         _kf_hide(ant_rig["wing_l"], f0, True)
         _kf_hide(ant_rig["wing_r"], f0, True)
         _kf_hide(ant_rig["wing_l"], f_wings, False)
         _kf_hide(ant_rig["wing_r"], f_wings, False)
 
-        # Human steps slightly back facing camera so face/chest forms the darkest shadow against ceiling neon
+        # Sandal gripped in hand; backlight behind human keeps his face in deep dark shadow!
+        _kf_grip(f0, 1.0)
+        _kf_loc_rot(sandal["root"], f0, (0.0, 0.02, -0.02), (90.0, 0.0, 0.0))
         _kf_loc_rot(human["root"], f0, (0.04, 2.48, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["left_leg"], f0, (0.12, 0.0, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (110.0, 0.0, 15.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.26, 2.18, 1.38), (115.0, 20.0, -15.0))
-        _kf_light(lights["neon_light"], f0, 420.0)
-        _kf_light(lights["rim_light"], f0, 480.0)
+        _kf_loc_rot(human["left_leg"], f0, (0.11, 0.0, 0.0), (0.0, 0.0, 0.0))
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (105.0, 0.0, 12.0))
+        _kf_light(lights["neon_light"], f0, 145.0)
+        _kf_light(lights["rim_light"], f0, 360.0)
 
         _kf_fov(cam_data, f0, 98.0)
         _kf_fov(cam_data, f_wings, 106.0)
         _kf_fov(cam_data, f_end, 102.0)
+        _kf_dof(f0, 1.15)
+        _kf_dof(f_end, 1.10)
 
-        # Wobbly, unsteered zig-zag liftoff from floor (z: 0.015 -> 1.42m)
         for fr in range(f0, f_end + 1, 2):
             if fr < f_wings:
                 u0 = (fr - f0) / max(1, f_wings - f0)
@@ -744,66 +756,67 @@ def build_ep001_animation(
                 pitch = _lerp(116.0, 96.0, uf) + 5.0 * math.sin(fr * 0.7)
                 roll = 14.0 * math.sin(uf * math.pi * 3.0) + 3.0 * math.cos(fr * 1.8)
                 yaw = -12.0 * math.cos(uf * math.pi * 2.5)
-                # Rapid high-speed wing buzz oscillation
-                flap = 24.0 * math.sin(fr * 2.8)
-                _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(12.0, flap, 18.0))
-                _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(12.0, -flap, -18.0))
+                flap = 18.0 * math.sin(fr * 2.8)
+                _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(-8.0, flap, 10.0))
+                _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(-8.0, -flap, -10.0))
 
             _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, yaw))
             _set_antennae_pose(ant_rig, fr, 12.0, 22.0, jitter=12.0)
 
     # =========================================================================
-    # SCENE 8: MAAF YA BANG — Direct dive to horrified face -> drop sandal -> CUT TO BLACK!
+    # SCENE 8: MAAF YA BANG — Dive to dark shadowed face -> drop sandal -> CUT TO BLACK 0.35s after scream!
     # =========================================================================
     if 8 in tmap:
         s8 = tmap[8]
         f0, f_end = s8["start_frame"], s8["end_frame"]
         f_drop = f_frac(8, 0.45)
-        f_black = max(f0 + 1, f_end - int(round(0.25 * fps)))  # Hard Cut-To-Black 0.25s before end!
+        # Cut to black right at end (0.35s after scream starts, synced via cut_to_black_sec)
+        f_black = max(f0 + 1, f_end - max(1, int(round(0.08 * fps))))
 
         _kf_hide(ant_rig["wing_l"], f0, False)
         _kf_hide(ant_rig["wing_r"], f0, False)
         _kf_hide(speed_rig["root"], f0, False)
 
-        # Human stands directly ahead (y=2.48, face at z=1.66, y=2.36)
         _kf_loc_rot(human["root"], f0, (0.0, 2.48, 0.0), (0.0, 0.0, 0.0))
-        _kf_loc_rot(human["head"], f0, (0.0, 0.0, 1.48), (-8.0, 0.0, 0.0))
-        _kf_loc_rot(human["head"], f_black, (0.0, 0.02, 1.48), (12.0, 0.0, 0.0))
+        _kf_loc_rot(human["head"], f0, (0.0, 0.0, 1.46), (-8.0, 0.0, 0.0))
+        _kf_loc_rot(human["head"], f_black, (0.0, 0.02, 1.46), (12.0, 0.0, 0.0))
 
-        # Eyes widen in sheer terror & mouth drops open!
         _kf_loc_rot(human["eye_l"], f0, scale=(1.0, 1.0, 1.0))
         _kf_loc_rot(human["eye_r"], f0, scale=(1.0, 1.0, 1.0))
-        _kf_loc_rot(human["eye_l"], f_drop, scale=(1.55, 1.2, 1.55))
-        _kf_loc_rot(human["eye_r"], f_drop, scale=(1.55, 1.2, 1.55))
+        _kf_loc_rot(human["eye_l"], f_drop, scale=(1.50, 1.2, 1.50))
+        _kf_loc_rot(human["eye_r"], f_drop, scale=(1.50, 1.2, 1.50))
         _kf_loc_rot(human["mouth"], f0, scale=(1.0, 1.0, 1.0))
-        _kf_loc_rot(human["mouth"], f_drop, scale=(1.35, 1.0, 3.8))
+        _kf_loc_rot(human["mouth"], f_drop, scale=(1.40, 1.0, 2.8))
 
-        # Human drops green-white Swallow flip-flop tumbling away in panic!
-        _kf_loc_rot(human["right_arm"], f0, (-0.26, 0.0, 1.38), (95.0, 0.0, 12.0))
-        _kf_loc_rot(human["right_arm"], f_drop + 10, (-0.26, 0.0, 1.38), (135.0, -35.0, 45.0))
-        _kf_loc_rot(sandal["root"], f0, (-0.26, 2.18, 1.42), (110.0, 15.0, -15.0))
+        # Gripped at start of Scene 8, then released as he recoils & drops sandal in panic
+        _kf_grip(f0, 1.0)
+        _kf_grip(f_drop - 1, 1.0)
+        _kf_grip(f_drop, 0.0)
+        _kf_loc_rot(human["right_arm"], f0, (-0.23, 0.0, 1.39), (95.0, 0.0, 12.0))
+        _kf_loc_rot(human["right_arm"], f_drop + 8, (-0.23, 0.0, 1.39), (135.0, -35.0, 45.0))
         _kf_loc_rot(sandal["root"], f_drop, (-0.30, 2.12, 1.36), (135.0, 35.0, -25.0))
         _kf_loc_rot(sandal["root"], f_black, (-0.42, 2.02, 0.18), (340.0, 190.0, 85.0))
 
-        # Camera locks on and rockets straight into human's horrified face!
         _kf_fov(cam_data, f0, 96.0)
         _kf_fov(cam_data, f_black, 108.0)
+        _kf_dof(f0, 0.90)
+        _kf_dof(f_black, 0.25)
 
         for fr in range(f0, f_black + 1, 2):
             u = (fr - f0) / max(1, (f_black - f0))
             ease = u ** 1.45
             cx = _lerp(0.05, 0.0, ease) + 0.014 * (1.0 - u) * math.sin(fr * 1.9)
             cy = _lerp(1.25, 2.24, ease)
-            cz = _lerp(1.48, 1.65, ease) + 0.010 * (1.0 - u) * math.cos(fr * 2.1)
+            cz = _lerp(1.48, 1.64, ease) + 0.010 * (1.0 - u) * math.cos(fr * 2.1)
             pitch = _lerp(96.0, 91.0, ease)
             roll = 4.5 * math.sin(fr * 2.2) * (1.0 - 0.5 * u)
             _kf_loc_rot(cam_obj, fr, (cx, cy, cz), (pitch, roll, 0.0))
             _set_antennae_pose(ant_rig, fr, -10.0, 24.0, jitter=15.0)
-            flap = 28.0 * math.sin(fr * 3.1)
-            _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(14.0, flap, 22.0))
-            _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(14.0, -flap, -22.0))
+            flap = 22.0 * math.sin(fr * 3.1)
+            _kf_loc_rot(ant_rig["wing_l_pivot"], fr, rot_deg=(-8.0, flap, 12.0))
+            _kf_loc_rot(ant_rig["wing_r_pivot"], fr, rot_deg=(-8.0, -flap, -12.0))
 
-        # HARD CUT TO BLACK 0.25s before impact!
+        # HARD CUT TO BLACK 0.35s after scream starts!
         _kf_hide(black_shutter, f_black - 1, True)
         _kf_hide(black_shutter, f_black, False)
         _kf_hide(black_shutter, f_end, False)
@@ -814,7 +827,7 @@ def build_ep001_animation(
 
 
 # =============================================================================
-# PER-SCENE RENDER + MP4 ENCODING
+# PER-SCENE RENDER (WITH AUTO-RESUME PER FRAME) + MP4 ENCODING
 # =============================================================================
 
 def render_scene_clip(
@@ -824,22 +837,39 @@ def render_scene_clip(
     ffmpeg_bin: str,
     fps: int,
 ) -> Path:
+    import time as _time
+
     sid = int(scene_meta["scene_id"])
     f_start = int(scene_meta["start_frame"])
     f_end = int(scene_meta["end_frame"])
+    total_scene_frames = f_end - f_start + 1
 
     frames_dir = scenes_out_dir / f"scene_{sid:02d}_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
-    # Clean stale PNGs if re-rendering this scene
-    for old_png in frames_dir.glob("frame_*.png"):
-        old_png.unlink(missing_ok=True)
 
-    scene.frame_start = f_start
-    scene.frame_end = f_end
-    scene.render.filepath = str(frames_dir / "frame_")
+    skipped = 0
+    rendered = 0
+    first_frame_time: Optional[float] = None
 
-    log("RENDER", f"Rendering Scene {sid:02d} | Frames {f_start}..{f_end} ({f_end - f_start + 1} frames)...")
-    bpy.ops.render.render(animation=True)
+    log("RENDER", f"Scene {sid:02d} | Frames {f_start}..{f_end} ({total_scene_frames} frames, auto-resume active)...")
+    for fr in range(f_start, f_end + 1):
+        frame_file = frames_dir / f"frame_{fr:04d}.png"
+        if frame_file.exists() and frame_file.stat().st_size > 10_240:
+            skipped += 1
+            continue
+
+        t0 = _time.monotonic()
+        scene.frame_set(fr)
+        scene.render.filepath = str(frame_file)
+        bpy.ops.render.render(write_still=True)
+        dt = _time.monotonic() - t0
+        rendered += 1
+        if first_frame_time is None:
+            first_frame_time = dt
+            rem = max(0, (f_end - fr))
+            log("RENDER", f"Scene {sid:02d} | Frame {fr} took {dt:.2f}s (est. remaining ~{rem * dt:.1f}s)")
+
+    log("RENDER", f"Scene {sid:02d} frames ready (rendered={rendered}, resumed/skipped={skipped})")
 
     out_mp4 = scenes_out_dir / f"scene_{sid:02d}.mp4"
     cmd = [
@@ -1007,7 +1037,7 @@ def main() -> int:
         log("ERROR", f"timing_manifest.json not found at {timing_path}. Run generate_tts.py first (Audio-First!).")
         return 1
     manifest = load_json(timing_path)
-    fps = int(manifest.get("fps", 30))
+    fps = int(manifest.get("fps", 24))
 
     # Start from a completely clean Blender scene
     bpy.ops.wm.read_factory_settings(use_empty=True)

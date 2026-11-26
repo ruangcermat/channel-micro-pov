@@ -40,8 +40,10 @@ from pipeline_utils import (
 DEFAULT_PRIMARY_MODEL = "gemini-3.8-flash-tts"
 DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash-lite-tts"
 DEFAULT_VOICE = "Puck"
-DEFAULT_FPS = 30
+DEFAULT_FPS = 24
 DEFAULT_SAMPLE_RATE = 24000
+DEFAULT_PAD_SEC = 0.06
+DEFAULT_VO_SPEED = 1.08
 
 
 def get_gemini_api_key() -> Optional[str]:
@@ -327,13 +329,19 @@ def main() -> int:
         "--fps",
         type=int,
         default=DEFAULT_FPS,
-        help="Target animation frame rate for frame counts (default: 30)",
+        help="Target animation frame rate for frame counts (default: 24)",
     )
     parser.add_argument(
         "--pad-sec",
         type=float,
-        default=0.25,
-        help="Breathing padding appended after each scene VO audio (default: 0.25s)",
+        default=DEFAULT_PAD_SEC,
+        help="Breathing padding appended after each scene VO audio (default: 0.06s)",
+    )
+    parser.add_argument(
+        "--vo-speed",
+        type=float,
+        default=DEFAULT_VO_SPEED,
+        help="Playback tempo multiplier for VO via FFmpeg atempo (default: 1.08, reuses cached WAVs)",
     )
     parser.add_argument(
         "--scene",
@@ -363,6 +371,7 @@ def main() -> int:
     primary_model = tts_cfg.get("model", DEFAULT_PRIMARY_MODEL)
     fallback_model = tts_cfg.get("fallback_model", DEFAULT_FALLBACK_MODEL)
     voice_name = args.voice or tts_cfg.get("voice_name", DEFAULT_VOICE)
+    vo_speed = max(0.5, min(2.0, float(args.vo_speed)))
 
     client = None
     if not args.dry_run:
@@ -381,7 +390,7 @@ def main() -> int:
             return 1
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
 
-    log("TTS", f"Episode: {spec['episode_id']} | Primary: {primary_model} | Fallback: {fallback_model} | Voice: {voice_name}")
+    log("TTS", f"Episode: {spec['episode_id']} | Primary: {primary_model} | Fallback: {fallback_model} | Voice: {voice_name} | VO Speed: {vo_speed}x")
     log("TTS", f"VO output dir: {vo_dir}")
 
     scenes_manifest: List[Dict[str, Any]] = []
@@ -404,11 +413,10 @@ def main() -> int:
         if should_generate:
             if args.dry_run:
                 est_dur = float(scene.get("est_duration_sec", 4.0))
-                # Leave room for pad_sec so total roughly matches est_duration_sec in dry-run
-                target_audio = max(1.0, est_dur - args.pad_sec)
+                target_audio = max(1.0, (est_dur - args.pad_sec) * vo_speed)
                 generate_dry_run_wav(wav_path, target_audio, sid)
                 used_model = "dry_run_placeholder"
-                log("TTS", f"[DRY-RUN] Scene {sid:02d} -> {wav_path.name} ({target_audio:.2f}s)")
+                log("TTS", f"[DRY-RUN] Scene {sid:02d} -> {wav_path.name} (raw {target_audio:.2f}s)")
             else:
                 log("TTS", f"Generating Scene {sid:02d}: text='{vo_text[:55]}...' | style='{style_prompt[:60]}...'")
                 audio_bytes, used_model = synthesize_scene_with_fallback(
@@ -424,37 +432,56 @@ def main() -> int:
         else:
             log("TTS", f"[CACHED] Scene {sid:02d} reusing {wav_path.name}")
 
-        audio_dur = measure_wav_duration(wav_path)
-        # Ensure scene has enough time for actual VO + breathing pad, and never cuts off late SFX cues
-        max_sfx_offset = max((float(c["offset_sec"]) for c in scene.get("sfx_cues", [])), default=0.0)
-        # Scene 8 has a sharp comedic cut-to-black right after VO + scream
-        scene_pad = 0.55 if sid == len(spec["scenes"]) else args.pad_sec
-        scene_dur = max(audio_dur + scene_pad, max_sfx_offset + 0.45)
+        raw_audio_dur = measure_wav_duration(wav_path)
+        audio_dur = raw_audio_dur / vo_speed
+
+        # Scene 6: 0.15s pre-VO pause so record_scratch at 0.0s doesn't overlap "kaki"
+        vo_delay_sec = 0.15 if sid == 6 else 0.0
+
+        # Scene 8: human_scream_cut triggers dynamically at audio_dur + 0.05s, cut to black 0.35s later
+        scream_offset_sec: Optional[float] = None
+        cut_to_black_sec: Optional[float] = None
+        if sid == len(spec["scenes"]):
+            scream_offset_sec = round(vo_delay_sec + audio_dur + 0.05, 4)
+            cut_to_black_sec = round(scream_offset_sec + 0.35, 4)
+            scene_dur = cut_to_black_sec
+        else:
+            max_sfx_offset = max(
+                (float(c["offset_sec"]) for c in scene.get("sfx_cues", []) if c["sfx_id"] != "human_scream_cut"),
+                default=0.0,
+            )
+            scene_dur = max(vo_delay_sec + audio_dur + args.pad_sec, max_sfx_offset + 0.20)
 
         frame_count = max(1, int(round(scene_dur * args.fps)))
         exact_scene_dur = frame_count / float(args.fps)
         start_frame = cursor_frame
         end_frame = cursor_frame + frame_count - 1
 
-        scenes_manifest.append(
-            {
-                "scene_id": sid,
-                "wav_path": str(wav_path),
-                "vo_text": vo_text,
-                "vo_delivery": scene.get("vo_delivery", ""),
-                "style_metadata_sent": style_prompt,
-                "on_screen_text": scene.get("on_screen_text", ""),
-                "model_used": used_model,
-                "audio_duration_sec": round(audio_dur, 4),
-                "scene_duration_sec": round(exact_scene_dur, 4),
-                "start_sec": round(cursor_sec, 4),
-                "end_sec": round(cursor_sec + exact_scene_dur, 4),
-                "start_frame": start_frame,
-                "end_frame": end_frame,
-                "frame_count": frame_count,
-                "est_duration_sec": float(scene.get("est_duration_sec", 4.0)),
-            }
-        )
+        entry: Dict[str, Any] = {
+            "scene_id": sid,
+            "wav_path": str(wav_path),
+            "vo_text": vo_text,
+            "vo_delivery": scene.get("vo_delivery", ""),
+            "style_metadata_sent": style_prompt,
+            "on_screen_text": scene.get("on_screen_text", ""),
+            "model_used": used_model,
+            "raw_audio_duration_sec": round(raw_audio_dur, 4),
+            "audio_duration_sec": round(audio_dur, 4),
+            "vo_delay_sec": vo_delay_sec,
+            "vo_speed": vo_speed,
+            "scene_duration_sec": round(exact_scene_dur, 4),
+            "start_sec": round(cursor_sec, 4),
+            "end_sec": round(cursor_sec + exact_scene_dur, 4),
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+            "frame_count": frame_count,
+            "est_duration_sec": float(scene.get("est_duration_sec", 4.0)),
+        }
+        if scream_offset_sec is not None:
+            entry["scream_offset_sec"] = scream_offset_sec
+            entry["cut_to_black_sec"] = cut_to_black_sec
+
+        scenes_manifest.append(entry)
 
         cursor_sec += exact_scene_dur
         cursor_frame = end_frame + 1
@@ -463,6 +490,8 @@ def main() -> int:
         "episode_id": spec["episode_id"],
         "title": spec["title"],
         "fps": args.fps,
+        "vo_speed": vo_speed,
+        "pad_sec": args.pad_sec,
         "voice_name": voice_name,
         "primary_model": primary_model,
         "fallback_model": fallback_model,

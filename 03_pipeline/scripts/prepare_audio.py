@@ -266,34 +266,35 @@ def synth_wings_buzz_loud() -> np.ndarray:
         + 0.35 * signal.sawtooth(phase * 2.02)
         + 0.25 * _bandpass(rng.standard_normal(n), 700.0, 4200.0)
     )
-    am = 0.55 + 0.45 * np.sin(2 * np.pi * 52.0 * t)
+    am = 0.60 + 0.40 * np.sin(2 * np.pi * 48.0 * t)
     env = np.minimum(1.0, t / 0.12) * np.minimum(1.0, (dur - t) / 0.15)
-    buzz = _bandpass(buzz * am, 95.0, 4600.0) * env
+    buzz = _lowpass(_bandpass(buzz * am, 90.0, 2200.0), 1800.0) * env
 
     # Stereo flutter as wings beat left & right of camera
     lfo = 0.5 + 0.25 * np.sin(2 * np.pi * 9.0 * t)
     stereo = np.stack([buzz * (1.0 - 0.35 * lfo), buzz * (0.65 + 0.35 * lfo)], axis=-1)
-    return _normalize_stereo(stereo, peak=0.92)
+    return _normalize_stereo(stereo, peak=0.82)
 
 
 def synth_record_scratch() -> np.ndarray:
     rng = np.random.default_rng(108)
-    dur = 0.55
+    dur = 0.25
     n = int(dur * SR)
     t = np.linspace(0, dur, n, endpoint=False)
 
-    # Classic comedic vinyl stop + sharp reverse zip
+    # Short, controlled comedic vinyl stop (0.25s)
     f_sweep = np.where(
-        t < 0.28,
-        1400.0 * np.exp(-t * 7.5) + 160.0,
-        280.0 + 1700.0 * (np.maximum(0.0, t - 0.28) / 0.27) ** 1.4,
+        t < 0.13,
+        1100.0 * np.exp(-t * 14.0) + 160.0,
+        240.0 + 1300.0 * (np.maximum(0.0, t - 0.13) / 0.12) ** 1.4,
     )
     phase = 2.0 * np.pi * np.cumsum(f_sweep) / SR
-    tone = signal.sawtooth(phase) * 0.6 + np.sin(phase * 1.5) * 0.4
-    grit = _bandpass(rng.standard_normal(n), 1200.0, 6500.0) * 0.45
-    env = np.exp(-((t - 0.14) ** 2) / 0.015) + 0.9 * np.exp(-((t - 0.38) ** 2) / 0.008)
-    y = _bandpass((tone + grit) * env, 250.0, 7000.0)
-    return _normalize_stereo(y, peak=0.93)
+    tone = signal.sawtooth(phase) * 0.55 + np.sin(phase * 1.5) * 0.45
+    grit = _bandpass(rng.standard_normal(n), 900.0, 4200.0) * 0.30
+    env = np.exp(-((t - 0.06) ** 2) / 0.004) + 0.85 * np.exp(-((t - 0.18) ** 2) / 0.003)
+    env[-int(0.02 * SR) :] *= np.linspace(1.0, 0.0, int(0.02 * SR))
+    y = _bandpass((tone + grit) * env, 250.0, 4800.0)
+    return _normalize_stereo(y, peak=0.85)
 
 
 def synth_human_scream_cut() -> np.ndarray:

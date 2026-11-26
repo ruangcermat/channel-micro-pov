@@ -66,9 +66,10 @@ def _escape_ass(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}").replace("\n", "\\N")
 
 
-def split_into_short_chunks(text: str, min_words: int = 2, max_words: int = 4) -> List[str]:
-    """Split VO sentence into punchy 2-4 word subtitle chunks respecting punctuation."""
-    # Split lightly on em-dash / sentence breaks first so timing feels natural
+def split_into_short_chunks(
+    text: str, min_words: int = 2, max_words: int = 3, max_chars: int = 18
+) -> List[str]:
+    """Split VO sentence into punchy 2-3 word (<= ~18 char) subtitle chunks so nothing clips 9:16."""
     raw_clauses = [c.strip() for c in re.split(r"(?<=[.!?—])\s+|—", text.strip()) if c.strip()]
     chunks: List[str] = []
 
@@ -77,21 +78,25 @@ def split_into_short_chunks(text: str, min_words: int = 2, max_words: int = 4) -
         idx = 0
         n = len(words)
         while idx < n:
-            rem = n - idx
-            if rem <= max_words:
-                take = rem
-            elif rem == max_words + 1:
-                take = 3  # Avoid orphan 1-word trailing chunk (e.g. 5 -> 3 + 2)
-            else:
-                take = 3 if rem % 3 == 0 else max_words
-            chunk = " ".join(words[idx : idx + take])
-            chunks.append(chunk)
+            take = min(max_words, n - idx)
+            # Shrink word count if combined characters exceed max_chars
+            while take > 1 and len(" ".join(words[idx : idx + take])) > max_chars:
+                take -= 1
+            # Avoid 1-word orphan if we can split 4 -> 2 + 2
+            if (n - idx) == 4 and take == 3 and len(" ".join(words[idx : idx + 2])) <= max_chars:
+                take = 2
+            chunks.append(" ".join(words[idx : idx + take]))
             idx += take
 
-    # Merge any accidental 1-word chunk with neighbor when possible
+    # Merge tiny 1-word chunk with neighbor only if still within max_words and max_chars
     merged: List[str] = []
     for ch in chunks:
-        if merged and len(ch.split()) == 1 and len(merged[-1].split()) < max_words:
+        if (
+            merged
+            and len(ch.split()) == 1
+            and len(merged[-1].split()) < max_words
+            and len(merged[-1] + " " + ch) <= max_chars
+        ):
             merged[-1] = merged[-1] + " " + ch
         else:
             merged.append(ch)
@@ -110,7 +115,6 @@ def _stylize_chunk_words(chunk: str, chunk_idx: int) -> str:
             has_highlight = True
         else:
             styled.append(_escape_ass(w.upper()))
-    # If no keyword matched on alternate chunks, highlight the last word for rhythmic visual pop
     if not has_highlight and words and (chunk_idx % 2 == 1):
         styled[-1] = r"{\c&H0000EAFF&}" + _escape_ass(words[-1].upper()) + r"{\c&H00FFFFFF&}"
     return " ".join(styled)
@@ -122,28 +126,19 @@ def generate_ass_subtitles(
     width: int = 1080,
     height: int = 1920,
 ) -> Path:
-    """Create stylized vertical 9:16 ASS subtitle file with safe 25% bottom margin."""
-    scale = height / 1920.0
-    sub_font_size = max(28, int(round(74 * scale)))
-    badge_font_size = max(24, int(round(56 * scale)))
-    outline_px = max(3, int(round(7 * scale)))
-    shadow_px = max(2, int(round(3 * scale)))
-    margin_v_bottom = int(round(height * 0.25))  # Safe 25% from bottom (above TikTok/Shorts UI)
-    margin_v_top = int(round(height * 0.14))     # Safe top zone (below status bar)
-    margin_lr = int(round(width * 0.07))
-
+    """Create stylized 1080x1920 ASS subtitle file (libass scales cleanly to preview/storyboard)."""
     header = f"""[Script Info]
 Title: {manifest.get('episode_id', 'EP')} Dynamic Subtitles
 ScriptType: v4.00+
-PlayResX: {width}
-PlayResY: {height}
+PlayResX: 1080
+PlayResY: 1920
 WrapStyle: 2
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: MainSub,DejaVu Sans,{sub_font_size},&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,{outline_px},{shadow_px},2,{margin_lr},{margin_lr},{margin_v_bottom},1
-Style: TopBadge,DejaVu Sans,{badge_font_size},&H0000EAFF,&H00FFFFFF,&H00000000,&HB0000000,-1,0,0,0,100,100,2,0,3,{max(2, outline_px - 2)},0,8,{margin_lr},{margin_lr},{margin_v_top},1
+Style: MainSub,DejaVu Sans,58,&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,5,2,2,90,90,380,1
+Style: TopBadge,DejaVu Sans,46,&H0000EAFF,&H00FFFFFF,&H00000000,&HB0000000,-1,0,0,0,100,100,2,0,3,3,0,8,90,90,260,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -153,16 +148,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     for scene in manifest["scenes"]:
         s_start = float(scene["start_sec"])
-        vo_dur = max(0.4, float(scene["audio_duration_sec"]))
+        vo_delay = float(scene.get("vo_delay_sec", 0.0))
+        vo_start = s_start + vo_delay
+        vo_dur = max(0.35, float(scene["audio_duration_sec"]))
         s_end = float(scene["end_sec"])
         vo_text = scene.get("vo_text", "").strip()
         badge = scene.get("on_screen_text", "").strip()
 
-        # Optional punchy top badge (shown cleanly for first 1.6s of scene, or until cut-to-black)
         if badge:
-            b_end = min(s_end - 0.15, s_start + 1.8)
+            b_end = min(s_end - 0.10, s_start + 1.65)
             if b_end > s_start + 0.25:
-                pop = r"{\fad(80,140)\t(0,90,\fscx108\fscy108)\t(90,170,\fscx100\fscy100)}"
+                pop = r"{\fad(80,140)\t(0,90,\fscx106\fscy106)\t(90,170,\fscx100\fscy100)}"
                 events.append(
                     f"Dialogue: 0,{_fmt_ass_time(s_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
                 )
@@ -170,18 +166,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not vo_text:
             continue
 
-        chunks = split_into_short_chunks(vo_text, min_words=2, max_words=4)
+        chunks = split_into_short_chunks(vo_text, min_words=2, max_words=3, max_chars=18)
         weights = [max(4, len(ch.replace(" ", ""))) for ch in chunks]
         total_w = float(sum(weights))
 
-        cur = s_start
+        cur = vo_start
         for idx, (ch, w) in enumerate(zip(chunks, weights)):
             dur = vo_dur * (w / total_w)
-            nxt = min(s_end - 0.05, cur + dur)
+            nxt = min(s_end - 0.03, cur + dur)
             if idx == len(chunks) - 1:
-                nxt = min(s_end - 0.05, s_start + vo_dur)
+                nxt = min(s_end - 0.03, vo_start + vo_dur)
             styled = _stylize_chunk_words(ch, global_chunk_idx)
-            anim = r"{\t(0,75,\fscx109\fscy109)\t(75,150,\fscx100\fscy100)}"
+            anim = r"{\t(0,70,\fscx106\fscy106)\t(70,140,\fscx100\fscy100)}"
             events.append(
                 f"Dialogue: 1,{_fmt_ass_time(cur)},{_fmt_ass_time(max(cur + 0.12, nxt))},MainSub,,0,0,0,,{anim}{styled}"
             )
@@ -190,7 +186,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     out_ass.parent.mkdir(parents=True, exist_ok=True)
     out_ass.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    log("SUBS", f"Generated ASS subtitles ({len(events)} events, bottom margin {margin_v_bottom}px = 25%) -> {out_ass}")
+    log("SUBS", f"Generated 1080x1920 ASS subtitles ({len(events)} events, MarginL/R=90, MarginV=380) -> {out_ass}")
     return out_ass
 
 
@@ -300,18 +296,21 @@ def mix_audio_and_compose(
     next_idx = 1
     filter_parts: List[str] = []
 
-    # 1. VO TRACK (each scene WAV placed precisely at timing_manifest start_sec)
+    # 1. VO TRACK (each scene WAV placed at start_sec + vo_delay_sec, with optional atempo=vo_speed)
     vo_labels: List[str] = []
     for s in manifest["scenes"]:
         wav = Path(s["wav_path"])
         if not wav.exists():
             raise FileNotFoundError(f"VO WAV missing: {wav}")
         inputs.extend(["-i", str(wav)])
-        delay_ms = int(round(float(s["start_sec"]) * 1000.0))
+        vo_delay = float(s.get("vo_delay_sec", 0.0))
+        vo_speed = float(s.get("vo_speed", manifest.get("vo_speed", 1.0)))
+        delay_ms = int(round((float(s["start_sec"]) + vo_delay) * 1000.0))
         lbl = f"vo{s['scene_id']}"
+        tempo_chain = f",atempo={vo_speed:.4f}" if abs(vo_speed - 1.0) > 1e-3 else ""
         filter_parts.append(
-            f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"adelay={delay_ms}|{delay_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
+            f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+            f"{tempo_chain},adelay={delay_ms}|{delay_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
         )
         vo_labels.append(f"[{lbl}]")
         next_idx += 1
@@ -321,11 +320,12 @@ def mix_audio_and_compose(
         f"volume=-6dB,asplit=2[vo_mix][vo_sc]"
     )
 
-    # 2. SFX TRACK (every cue placed at exact scene.start_sec + cue.offset_sec at -10 dB)
+    # 2. SFX TRACK (dynamic Scene 8 scream timing + per-SFX gain control)
     sfx_labels: List[str] = []
     sfx_counter = 0
     for sid in sorted(scene_map.keys()):
-        s_start = float(scene_map[sid]["start_sec"])
+        sc_meta = scene_map[sid]
+        s_start = float(sc_meta["start_sec"])
         for cue in spec_scene_map[sid].get("sfx_cues", []):
             sfx_id = cue["sfx_id"]
             sfx_file = assets_dir / "sfx" / f"{sfx_id}.wav"
@@ -333,13 +333,30 @@ def mix_audio_and_compose(
                 log("WARN", f"SFX file not found ({sfx_file}); skipping cue {sfx_id}")
                 continue
             inputs.extend(["-i", str(sfx_file)])
-            abs_ms = max(0, int(round((s_start + float(cue["offset_sec"])) * 1000.0)))
+
+            # Dynamic offset overrides for tight comedic/narrative sync
+            offset_sec = float(cue["offset_sec"])
+            if sfx_id == "human_scream_cut" and "scream_offset_sec" in sc_meta:
+                offset_sec = float(sc_meta["scream_offset_sec"])
+            elif sid == 6 and sfx_id == "record_scratch":
+                offset_sec = 0.0
+
+            abs_ms = max(0, int(round((s_start + offset_sec) * 1000.0)))
             lbl = f"sfx{sfx_counter}"
-            # Trim SFX cleanly so it doesn't extend past total video duration
             max_play = max(0.15, total_dur - (abs_ms / 1000.0))
+            if sfx_id == "record_scratch":
+                max_play = min(max_play, 0.25)
+
+            # Controlled per-SFX levels relative to -10 dB SFX bus
+            extra_gain = ""
+            if sfx_id == "record_scratch":
+                extra_gain = ",volume=-4dB"  # -10dB bus -4dB = -14 dB
+            elif sfx_id == "wings_buzz_loud":
+                extra_gain = ",lowpass=f=1800,volume=-6dB"  # -10dB bus -6dB = -16 dB smooth
+
             filter_parts.append(
-                f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                f"atrim=0:{max_play:.4f},adelay={abs_ms}|{abs_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
+                f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
+                f"{extra_gain},atrim=0:{max_play:.4f},adelay={abs_ms}|{abs_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
             )
             sfx_labels.append(f"[{lbl}]")
             sfx_counter += 1

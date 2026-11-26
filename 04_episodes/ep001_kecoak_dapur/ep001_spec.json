@@ -122,7 +122,7 @@
       "visual_action": "Kaki manusia raksasa memblokir celah kolong kulkas. Kamera menoleh panik kiri-kanan-atas menunjukkan posisi benar-benar terkepung.",
       "assets_used": ["kitchen_tile_floor", "human_silhouette_giant", "sandal_jepit_swallow", "fridge_under_gap"],
       "sfx_cues": [
-        {"sfx_id": "record_scratch", "offset_sec": 0.1},
+        {"sfx_id": "record_scratch", "offset_sec": 0.0},
         {"sfx_id": "wind_whoosh_heavy", "offset_sec": 3.2}
       ],
       "lighting": "Terang tajam penuh tekanan",
