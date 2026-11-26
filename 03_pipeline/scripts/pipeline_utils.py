@@ -289,6 +289,46 @@ def resolve_family_ready_blend(assets_dir: Optional[Path] = None) -> Optional[Pa
     return None
 
 
+def resolve_mas_dimas_blend(assets_dir: Optional[Path] = None) -> Optional[Path]:
+    """Locate permanent mascot `mas_dimas_ready.blend` from Drive/Kaggle/local cache.
+
+    Search order:
+    1. Environment variable `MICRO_POV_MAS_DIMAS_BLEND`
+    2. Project cache `<assets_dir>/models_3d/mas_dimas_ready.blend`
+    3. Google Drive project cache `/content/drive/MyDrive/channel-micro-pov/02_assets/models_3d/mas_dimas_ready.blend`
+    4. Kaggle input datasets (`/kaggle/input/**/mas_dimas_ready.blend`)
+    """
+    cache_dir = (assets_dir or resolve_assets_dir()) / "models_3d"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached_dest = cache_dir / "mas_dimas_ready.blend"
+
+    candidates: List[Path] = []
+    if os.environ.get("MICRO_POV_MAS_DIMAS_BLEND"):
+        candidates.append(Path(os.environ["MICRO_POV_MAS_DIMAS_BLEND"]).expanduser())
+    candidates.append(cached_dest)
+    candidates.append(DEFAULT_DRIVE_PROJECT_DIR / "02_assets" / "models_3d" / "mas_dimas_ready.blend")
+
+    kaggle_input = Path("/kaggle/input")
+    if kaggle_input.exists():
+        for found in sorted(kaggle_input.rglob("mas_dimas_ready.blend")):
+            candidates.append(found)
+
+    for cand in candidates:
+        if cand.exists() and cand.stat().st_size > 1_000_000:
+            if cand.resolve() != cached_dest.resolve():
+                try:
+                    tmp_copy = cached_dest.with_suffix(".blend.part")
+                    shutil.copy2(cand, tmp_copy)
+                    tmp_copy.replace(cached_dest)
+                    log("ASSETS", f"Cached mas_dimas_ready.blend -> {cached_dest} (from {cand})")
+                    return cached_dest
+                except Exception as exc:
+                    log("WARN", f"Could not copy mas_dimas_ready.blend to cache ({exc}); using source directly: {cand}")
+                    return cand
+            return cand
+    return None
+
+
 def apply_post_camera_look(src_png: Path, dst_png: Optional[Path] = None, seed: int = 7) -> Path:
     """Apply the Zack-Blender-Pack `post.py` real-camera pass (soft lens, glow, vignette, film grain).
 

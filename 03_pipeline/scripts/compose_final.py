@@ -27,9 +27,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+PIPELINE_DIR = SCRIPT_DIR.parent
+for _p in (str(SCRIPT_DIR), str(PIPELINE_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
+from core.audio_utils import (
+    build_vo_microfade_filter,
+    ensure_room_tone_wav,
+    extract_word_timestamps,
+    group_timed_words_into_chunks,
+)
 from pipeline_utils import (
     check_ffmpeg_available,
     get_repo_root,
@@ -125,8 +133,9 @@ def generate_ass_subtitles(
     out_ass: Path,
     width: int = 1080,
     height: int = 1920,
+    use_whisper: bool = True,
 ) -> Path:
-    """Create stylized 1080x1920 ASS subtitle file (libass scales cleanly to preview/storyboard)."""
+    """Create stylized 1080x1920 ASS subtitle file using `faster-whisper` word timestamps (with safe fallback)."""
     header = f"""[Script Info]
 Title: {manifest.get('episode_id', 'EP')} Dynamic Subtitles
 ScriptType: v4.00+
@@ -145,15 +154,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events: List[str] = []
     global_chunk_idx = 0
+    whisper_scenes = 0
 
     for scene in manifest["scenes"]:
         s_start = float(scene["start_sec"])
         vo_delay = float(scene.get("vo_delay_sec", 0.0))
+        vo_speed = float(scene.get("vo_speed", manifest.get("vo_speed", 1.0)))
         vo_start = s_start + vo_delay
         vo_dur = max(0.35, float(scene["audio_duration_sec"]))
         s_end = float(scene["end_sec"])
         vo_text = scene.get("vo_text", "").strip()
         badge = scene.get("on_screen_text", "").strip()
+        wav_path = Path(scene["wav_path"]) if scene.get("wav_path") else None
 
         if badge:
             b_end = min(s_end - 0.10, s_start + 1.65)
@@ -166,27 +178,50 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if not vo_text:
             continue
 
-        chunks = split_into_short_chunks(vo_text, min_words=2, max_words=3, max_chars=18)
-        weights = [max(4, len(ch.replace(" ", ""))) for ch in chunks]
-        total_w = float(sum(weights))
+        # Prefer millisecond-accurate faster-whisper word timestamps when WAV exists!
+        timed_chunks = None
+        if use_whisper and wav_path and wav_path.exists():
+            timed_words = extract_word_timestamps(wav_path, vo_text, vo_speed=vo_speed)
+            if timed_words:
+                timed_chunks = group_timed_words_into_chunks(timed_words, max_words=3, max_chars=18)
+                whisper_scenes += 1
 
-        cur = vo_start
-        for idx, (ch, w) in enumerate(zip(chunks, weights)):
-            dur = vo_dur * (w / total_w)
-            nxt = min(s_end - 0.03, cur + dur)
-            if idx == len(chunks) - 1:
-                nxt = min(s_end - 0.03, vo_start + vo_dur)
-            styled = _stylize_chunk_words(ch, global_chunk_idx)
-            anim = r"{\t(0,70,\fscx106\fscy106)\t(70,140,\fscx100\fscy100)}"
-            events.append(
-                f"Dialogue: 1,{_fmt_ass_time(cur)},{_fmt_ass_time(max(cur + 0.12, nxt))},MainSub,,0,0,0,,{anim}{styled}"
-            )
-            cur = nxt
-            global_chunk_idx += 1
+        if timed_chunks:
+            for idx, item in enumerate(timed_chunks):
+                t0 = max(s_start, vo_start + float(item["start"]))
+                t1 = min(s_end - 0.02, vo_start + float(item["end"]) + 0.04)
+                if idx + 1 < len(timed_chunks):
+                    next_t0 = vo_start + float(timed_chunks[idx + 1]["start"])
+                    t1 = min(t1, max(t0 + 0.10, next_t0 - 0.01))
+                styled = _stylize_chunk_words(item["text"], global_chunk_idx)
+                anim = r"{\t(0,70,\fscx106\fscy106)\t(70,140,\fscx100\fscy100)}"
+                events.append(
+                    f"Dialogue: 1,{_fmt_ass_time(t0)},{_fmt_ass_time(max(t0 + 0.12, t1))},MainSub,,0,0,0,,{anim}{styled}"
+                )
+                global_chunk_idx += 1
+        else:
+            chunks = split_into_short_chunks(vo_text, min_words=2, max_words=3, max_chars=18)
+            weights = [max(4, len(ch.replace(" ", ""))) for ch in chunks]
+            total_w = float(sum(weights))
+
+            cur = vo_start
+            for idx, (ch, w) in enumerate(zip(chunks, weights)):
+                dur = vo_dur * (w / total_w)
+                nxt = min(s_end - 0.03, cur + dur)
+                if idx == len(chunks) - 1:
+                    nxt = min(s_end - 0.03, vo_start + vo_dur)
+                styled = _stylize_chunk_words(ch, global_chunk_idx)
+                anim = r"{\t(0,70,\fscx106\fscy106)\t(70,140,\fscx100\fscy100)}"
+                events.append(
+                    f"Dialogue: 1,{_fmt_ass_time(cur)},{_fmt_ass_time(max(cur + 0.12, nxt))},MainSub,,0,0,0,,{anim}{styled}"
+                )
+                cur = nxt
+                global_chunk_idx += 1
 
     out_ass.parent.mkdir(parents=True, exist_ok=True)
     out_ass.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
-    log("SUBS", f"Generated 1080x1920 ASS subtitles ({len(events)} events, MarginL/R=95, MarginV=380) -> {out_ass}")
+    sync_tag = f"faster-whisper ({whisper_scenes}/{len(manifest['scenes'])} scenes)" if whisper_scenes else "weighted"
+    log("SUBS", f"Generated 1080x1920 ASS subtitles ({len(events)} events, sync={sync_tag}, MarginV=380) -> {out_ass}")
     return out_ass
 
 
@@ -296,7 +331,7 @@ def mix_audio_and_compose(
     next_idx = 1
     filter_parts: List[str] = []
 
-    # 1. VO TRACK (each scene WAV placed at start_sec + vo_delay_sec, with optional atempo=vo_speed)
+    # 1. VO TRACK (each scene WAV placed at start_sec + vo_delay_sec, with 15ms micro-fade & optional atempo)
     vo_labels: List[str] = []
     for s in manifest["scenes"]:
         wav = Path(s["wav_path"])
@@ -305,12 +340,14 @@ def mix_audio_and_compose(
         inputs.extend(["-i", str(wav)])
         vo_delay = float(s.get("vo_delay_sec", 0.0))
         vo_speed = float(s.get("vo_speed", manifest.get("vo_speed", 1.0)))
+        vo_dur_eff = float(s.get("audio_duration_sec", 0.5))
         delay_ms = int(round((float(s["start_sec"]) + vo_delay) * 1000.0))
         lbl = f"vo{s['scene_id']}"
         tempo_chain = f",atempo={vo_speed:.4f}" if abs(vo_speed - 1.0) > 1e-3 else ""
+        microfade = build_vo_microfade_filter(vo_dur_eff, fade_ms=15.0)
         filter_parts.append(
             f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo"
-            f"{tempo_chain},adelay={delay_ms}|{delay_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
+            f"{tempo_chain},{microfade},adelay={delay_ms}|{delay_ms},apad=whole_dur={total_dur:.4f}[{lbl}]"
         )
         vo_labels.append(f"[{lbl}]")
         next_idx += 1
@@ -426,14 +463,35 @@ def mix_audio_and_compose(
         filter_parts.append("[vo_sc]anullsink")
         filter_parts.append(f"anullsrc=r=48000:cl=stereo:d={total_dur:.4f}[bgm_ducked]")
 
-    # 4. MASTER MIX + -14 LUFS LOUDNESS NORMALIZATION
+    # 4. DYNAMIC ROOM TONE BED (-32 dB default so there is NEVER digital dead-silence!)
+    rt_cfg = spec.get("room_tone")
+    rt_id = "night_fridge_hum"
+    rt_db = -32.0
+    if isinstance(rt_cfg, dict):
+        rt_id = str(rt_cfg.get("id", "night_fridge_hum"))
+        rt_db = float(rt_cfg.get("level_db", -32.0))
+    elif isinstance(rt_cfg, str) and rt_cfg.strip():
+        rt_id = rt_cfg.strip()
+    rt_wav = ensure_room_tone_wav(rt_id, assets_dir)
+    inputs.extend(["-stream_loop", "-1", "-i", str(rt_wav)])
+    # Room tone is synthesized at -12 dBFS, so adjust relative to target dB (e.g. -20dB -> -32 dBFS)
+    rel_rt_db = rt_db + 12.0
+    rt_fade_out = max(0.0, total_dur - 0.12)
     filter_parts.append(
-        "[vo_mix][sfx_bus][bgm_ducked]amix=inputs=3:duration=first:normalize=0,"
+        f"[{next_idx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+        f"atrim=0:{total_dur:.4f},asetpts=PTS-STARTPTS,"
+        f"afade=t=in:st=0:d=0.08,afade=t=out:st={rt_fade_out:.4f}:d=0.10,"
+        f"volume={rel_rt_db:.1f}dB[room_bus]"
+    )
+    next_idx += 1
+
+    # 5. MASTER MIX + -14 LUFS LOUDNESS NORMALIZATION
+    filter_parts.append(
+        "[vo_mix][sfx_bus][bgm_ducked][room_bus]amix=inputs=4:duration=first:normalize=0,"
         f"atrim=0:{total_dur:.4f},loudnorm=I=-14:TP=-1.5:LRA=11[a_master]"
     )
 
-    # 5. VIDEO BURN-IN SUBTITLES (.ass)
-    # Escape path characters for FFmpeg ass filter
+    # 6. VIDEO BURN-IN SUBTITLES (.ass)
     ass_escaped = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     filter_parts.append(f"[0:v]ass='{ass_escaped}'[v_sub]")
 
@@ -473,7 +531,7 @@ def mix_audio_and_compose(
         str(output_mp4),
     ]
 
-    log("COMPOSE", f"Mixing VO + {sfx_counter} SFX + {bgm_counter} BGM + ASS subtitles -> {output_mp4}...")
+    log("COMPOSE", f"Mixing VO (15ms fade) + {sfx_counter} SFX + {bgm_counter} BGM + room_tone ({rt_id} {rt_db:.0f}dB) + ASS -> {output_mp4}...")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         log("ERROR", f"FFmpeg failed:\n{proc.stderr[-2500:]}")
@@ -486,7 +544,7 @@ def mix_audio_and_compose(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate dynamic .ass subtitles and compose final -14 LUFS vertical MP4."
+        description="Generate dynamic .ass subtitles (faster-whisper) and compose final -14 LUFS vertical MP4."
     )
     parser.add_argument(
         "--spec",
@@ -496,8 +554,9 @@ def main() -> int:
     parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
     parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets directory")
     parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
-    parser.add_argument("--mode", choices=["storyboard", "preview", "final"], default="final")
+    parser.add_argument("--mode", choices=["storyboard", "motion_check", "preview", "final"], default="final")
     parser.add_argument("--output", type=str, default=None, help="Override final output .mp4 path")
+    parser.add_argument("--no-whisper", action="store_true", help="Disable faster-whisper word timestamps")
     parser.add_argument(
         "--dry-run-video",
         action="store_true",
@@ -520,15 +579,14 @@ def main() -> int:
     scenes_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
     scenes_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optional dry-run video generator so full audio/subtitle/FFmpeg pipeline can be verified without Blender
     if args.dry_run_video:
-        if args.mode == "storyboard":
+        if args.mode in ("storyboard", "motion_check"):
             w, h = (360, 640)
         elif args.mode == "preview":
             w, h = (540, 960)
         else:
             w, h = (1080, 1920)
-        fps = int(manifest.get("fps", 30))
+        fps = int(manifest.get("fps", 24))
         colors = ["#0c1933", "#1e2a38", "#073440", "#2f3542", "#1b2631", "#3b1d1d", "#2c2214", "#121212"]
         for s in manifest["scenes"]:
             sid = int(s["scene_id"])
@@ -562,13 +620,15 @@ def main() -> int:
 
     w, h = probe_video_resolution(concat_mp4)
     ass_path = work_dir / f"subtitles_{args.mode}.ass"
-    generate_ass_subtitles(manifest, ass_path, width=w, height=h)
+    generate_ass_subtitles(manifest, ass_path, width=w, height=h, use_whisper=not args.no_whisper)
 
     ep_slug = spec["episode_id"].lower()
     if args.mode == "final":
         default_out_name = f"final_{ep_slug}.mp4"
     elif args.mode == "storyboard":
         default_out_name = f"animatic_{ep_slug}.mp4"
+    elif args.mode == "motion_check":
+        default_out_name = f"motion_check_{ep_slug}.mp4"
     else:
         default_out_name = f"preview_{ep_slug}.mp4"
     output_mp4 = Path(args.output).resolve() if args.output else (work_dir / default_out_name)

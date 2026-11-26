@@ -1,8 +1,15 @@
 {
   "episode_id": "EP001",
+  "channel": "Jadi Apa",
+  "mascot": "Mas Dimas",
   "title": "POV Kamu Jadi Kecoak di Dapur Jam 2 Pagi",
   "universe": "Semesta Kosan",
-  "target_duration_sec": 40,
+  "target_duration_sec": 44,
+  "room_tone": {
+    "id": "night_fridge_hum",
+    "level_db": -32,
+    "mood": "dengung halus kulkas kosan jam 2 pagi tanpa dead silence"
+  },
   "tts_config": {
     "provider": "gemini_tts",
     "model": "gemini-3.8-flash-tts",
@@ -15,8 +22,9 @@
     "subject": "Kecoak dapur dewasa",
     "camera_height_m": 0.015,
     "base_fov_deg": 95,
-    "visual_style": "Low-poly stylized bersih, kontras tinggi, skala benda raksasa dari sudut lantai",
-    "hud_or_foreground": "Dua antena tipis melengkung di pinggir kiri-kanan bawah layar yang ikut bergetar sesuai emosi"
+    "camera_archetype": "insect_ground",
+    "visual_style": "3D Micro-POV sinematik MPFB2 (Mas Dimas) + properti nyata Poly Haven CC0, AgX Medium High Contrast, Macro DOF, post.py",
+    "hud_or_foreground": "Dua antena cokelat gelap menyapu ke tepi luar + ujung 2 kaki depan mikro (Scene 1, 4, 5) + sayap amber berurat transparan (Scene 7–8)"
   },
   "bgm_plan": [
     {
@@ -35,7 +43,7 @@
       "bgm_id": "none_cut_silence",
       "start_scene": 8,
       "end_scene": 8,
-      "mood": "hening mendadak lalu pecah komedi"
+      "mood": "hening mendadak (hanya room_tone -32dB) lalu pecah komedi"
     }
   ],
   "scenes": [
@@ -44,14 +52,16 @@
       "est_duration_sec": 4.0,
       "vo_text": "Jam dua pagi. Lampu dapur mendadak nyala. Masalahnya, kamu lagi jadi kecoak yang kepergok nyeruput kuah mi.",
       "vo_delivery": "Santai dan pelan di kalimat pertama, lalu kaget dan cepat dengan nada apes",
-      "camera_motion": "Diam rendah menghadap genangan kuah, lalu mendadak tersentak ke atas saat cahaya putih menyilaukan menyala",
-      "visual_action": "Lantai dapur gelap kebiruan. Di depan kamera ada genangan kuah mi kuning reflektif dan potongan mi low-poly raksasa. Detik ke-1.1 ruangan meledak terang benderang putih neon. Dua antena di tepi layar langsung kaku berdiri.",
-      "assets_used": ["kitchen_tile_floor", "indomie_bowl_spill"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["handheld_breath", "snap_jerk"],
+      "camera_motion": "01A: diam rendah menghadap kuah mi & bayangan kecoak; 01B: snap_jerk tersentak ke atas saat saklar lampu ditekan Mas Dimas",
+      "visual_action": "01A (0.0–1.0s): Remang biru jam 2 pagi dengan specular tipis di kuah mi & bayangan siluet kecoak; Mas Dimas (kaus merah bata JADI APA, kacamata hitam matte, MEMAKAI SEPASANG sandal jepit hijau di kedua kaki) berdiri di dinding samping menjangkau saklar lampu. 01B (1.05s+): Lampu neon menyala terang, Mas Dimas baru selesai menekan saklar lalu menoleh kaget melihat kecoak di lantai—kedua kaki masih bersandal hijau, belum ada sandal di tangan.",
+      "assets_used": ["kitchen_tile_floor", "indomie_bowl_spill", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "light_switch_click", "offset_sec": 1.0},
         {"sfx_id": "fluorescent_hum", "offset_sec": 1.1}
       ],
-      "lighting": "Gelap malam biru redup -> Flash putih neon terang ekstrem",
+      "lighting": "Remang malam biru terbaca + specular kuah -> Flash putih neon terang ekstrem",
       "on_screen_text": "JAM 2 PAGI"
     },
     {
@@ -59,14 +69,16 @@
       "est_duration_sec": 4.0,
       "vo_text": "Di depanmu, raksasa udah melotot—tangannya ngangkat sandal jepit ijo.",
       "vo_delivery": "Dramatis seperti narator trailer film aksi",
-      "camera_motion": "Tilt ekstrem ke atas (low angle), zoom-in patah-patah ke arah tangan yang mengangkat sandal",
-      "visual_action": "Siluet manusia berkaus oblong menjulang seperti gedung dari sudut lantai. Cahaya menyorot sandal jepit putih-hijau di tangan kanan yang terangkat tinggi.",
-      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant", "sandal_jepit_swallow"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["handheld_breath"],
+      "camera_motion": "Tilt ekstrem ke atas (low angle) + handheld_breath, zoom-in patah-patah ke Mas Dimas yang ancang-ancang menggeplak",
+      "visual_action": "Mas Dimas melangkah maju mengadang, bungkuk melotot di balik kacamata hitam matte. Kontinuitas sandal: kaki KANAN nyeker (sandal kanannya sudah dicopot & digenggam tangan kanan dengan sikut tekuk backswing + sol hijau datar menghadap depan-bawah), sedangkan kaki KIRI TETAP memakai sandal jepit hijau sebelah kiri.",
+      "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "dramatic_boom", "offset_sec": 0.2},
         {"sfx_id": "dramatic_boom", "offset_sec": 2.4}
       ],
-      "lighting": "Backlight lampu neon dari belakang kepala manusia seperti boss terakhir game",
+      "lighting": "Backlight lampu neon dari belakang kepala Mas Dimas seperti boss terakhir game",
       "on_screen_text": "BOSS TERAKHIR"
     },
     {
@@ -74,9 +86,11 @@
       "est_duration_sec": 5.0,
       "vo_text": "Tenang, kamu punya cheat code. Dua antena di pantatmu langsung nangkep angin dari ayunan tangannya.",
       "vo_delivery": "Percaya diri, cepat, penekanan kocak di kata 'cheat code' dan 'pantatmu'",
-      "camera_motion": "Slow-motion dramatis (bullet time), kamera sedikit miring menatap sandal yang mulai mengayun turun",
-      "visual_action": "Garis gelombang udara (wind lines) bercahaya cyan melesat dari arah sandal yang mulai turun ke arah kamera. Gerakan melambat drastis.",
-      "assets_used": ["kitchen_tile_floor", "sandal_jepit_swallow"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["bullet_time"],
+      "camera_motion": "Slow-motion dramatis (bullet_time), kamera miring menatap sandal jepit kanan yang mengayun turun datar",
+      "visual_action": "Mas Dimas mengayun sandal kanan ke bawah (sol hijau datar mengarah ke kecoak; kaki kanan nyeker, kaki kiri masih bersandal hijau). Garis gelombang udara cyan melesat dari arah sandal menuju antena kecoak yang bereaksi menangkap angin.",
+      "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "wind_whoosh_heavy", "offset_sec": 2.2}
       ],
@@ -88,14 +102,16 @@
       "est_duration_sec": 6.0,
       "vo_text": "Lebih cepat dari kedipan mata, kakimu udah tancap gas duluan—buat ukuran tubuhmu, itu setara lari tiga ratus kilometer per jam!",
       "vo_delivery": "Sangat cepat, bersemangat, memacu adrenalin",
-      "camera_motion": "Sprint POV super cepat dengan camera shake halus, FOV melebar ke 112 derajat agar terasa ngebut ekstrem",
-      "visual_action": "Sandal jepit raksasa menghantam lantai tepat di belakang kamera menimbulkan kepulan debu low-poly. Kamera langsung melesat kencang menyusuri garis nat keramik.",
-      "assets_used": ["kitchen_tile_floor", "sandal_jepit_swallow"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["impact_bump", "fov_rush"],
+      "camera_motion": "Sprint POV super cepat dengan impact_bump 5 frame saat sandal menghantam lantai + fov_rush 95° -> 112° menyusuri nat keramik",
+      "visual_action": "Sandal jepit kanan menghantam datar lantai keramik tepat di sisi kamera disertai kepulan debu tipis semi-transparan. Kamera miring dinamis (Dutch tilt) melesat kencang menuju kolong kulkas.",
+      "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "sandal_slam_thud", "offset_sec": 0.5},
         {"sfx_id": "skitter_fast", "offset_sec": 0.9}
       ],
-      "lighting": "Terang dinamis dengan garis kecepatan halus di tepi layar",
+      "lighting": "Terang dinamis dengan garis kecepatan halus di tepi luar layar",
       "on_screen_text": "300 KM/JAM"
     },
     {
@@ -103,14 +119,16 @@
       "est_duration_sec": 4.0,
       "vo_text": "Kolong kulkas tinggal sejengkal lagi...",
       "vo_delivery": "Penuh harapan, terengah-engah tapi optimis",
-      "camera_motion": "Melesat lurus cepat mengarah ke celah gelap di bawah kulkas",
-      "visual_action": "Celah gelap di bawah kulkas terlihat makin dekat seperti garis finis. Di akhir detik ke-3, bayangan kaki besar jatuh menutupi jalur di depan kamera.",
-      "assets_used": ["kitchen_tile_floor", "fridge_under_gap"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["impact_bump"],
+      "camera_motion": "Melesat lurus cepat mengarah ke celah kolong kulkas 5.5cm + impact_bump saat kaki kiri bersandal mendarat menutup jalur",
+      "visual_action": "Celah gelap di bawah kulkas terlihat makin dekat. Di akhir adegan, kaki KIRI Mas Dimas yang masih memakai sandal jepit hijau sebelah kiri menghentak turun tepat menutupi jalur masuk kolong kulkas.",
+      "assets_used": ["kitchen_tile_floor", "fridge_under_gap", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "skitter_fast", "offset_sec": 0.0},
         {"sfx_id": "dramatic_boom", "offset_sec": 3.0}
       ],
-      "lighting": "Bayangan gelap tiba-tiba jatuh memotong cahaya lantai di depan kamera",
+      "lighting": "Bayangan gelap kaki bersandal tiba-tiba jatuh memotong cahaya lantai di depan kamera",
       "on_screen_text": "TINGGAL SEJENGKAL"
     },
     {
@@ -118,9 +136,11 @@
       "est_duration_sec": 5.0,
       "vo_text": "Eh, kaki kirinya nutup jalan! Kiri tembok, kanan buntu, sandal udah mau jatuh.",
       "vo_delivery": "Panik mendadak, ritme cepat dan patah-patah",
-      "camera_motion": "Rem mendadak, whip-pan cepat ke kiri (tembok), whip-pan ke kanan (buntu/kardus), whip-pan ke atas (sandal siap jatuh)",
-      "visual_action": "Kaki manusia raksasa memblokir celah kolong kulkas. Kamera menoleh panik kiri-kanan-atas menunjukkan posisi benar-benar terkepung.",
-      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant", "sandal_jepit_swallow", "fridge_under_gap"],
+      "camera_archetype": "insect_ground",
+      "motion_modifiers": ["whip_pan"],
+      "camera_motion": "Rem mendadak, whip_pan cepat kiri (tembok) -> kanan (kardus buntu) -> atas (Mas Dimas ancang-ancang backswing sandal kanan)",
+      "visual_action": "Kaki KIRI Mas Dimas yang memakai sandal jepit hijau memblokir kolong kulkas (kaki kanan nyeker), sementara tangan kanannya tertekuk backswing di atas menggenggam sandal kanan datar siap menjatuhkan pukulan.",
+      "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow", "fridge_under_gap"],
       "sfx_cues": [
         {"sfx_id": "record_scratch", "offset_sec": 0.0},
         {"sfx_id": "wind_whoosh_heavy", "offset_sec": 3.2}
@@ -133,13 +153,15 @@
       "est_duration_sec": 6.5,
       "vo_text": "Sisa satu tombol darurat. Kamu buka sayap. Jujur, kamu nggak bisa nyetir—cuma asal terbang nyari tempat paling gelap.",
       "vo_delivery": "Dramatis di dua kalimat awal, lalu mendadak jujur dan agak konyol di kalimat 'nggak bisa nyetir'",
-      "camera_motion": "Kamera lepas landas dari lantai secara oleng tidak stabil lalu menanjak cepat",
-      "visual_action": "Dua sayap transparan kecokelatan terbuka bergetar di sisi kiri-kanan layar. Kamera naik zig-zag oleng meninggalkan lantai dapur.",
-      "assets_used": ["kitchen_tile_floor", "human_silhouette_giant"],
+      "camera_archetype": "aerial_erratic",
+      "motion_modifiers": ["erratic_wobble", "rapid_wing_flutter"],
+      "camera_motion": "Lepas landas oleng tidak stabil (aerial_erratic + erratic_wobble + rapid_wing_flutter) menanjak cepat ke arah Mas Dimas",
+      "visual_action": "Dua sayap cokelat-amber transparan berurat terbuka dengan rapid wing flutter di tepi kiri-kanan bawah lensa. Kamera naik zig-zag oleng menuju Mas Dimas berkaus merah bata JADI APA yang mulai kaget.",
+      "assets_used": ["kitchen_tile_floor", "mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "wings_buzz_loud", "offset_sec": 1.6}
       ],
-      "lighting": "Lampu neon di atas silau, membuat area wajah/dada manusia terlihat sebagai bayangan paling gelap di ruangan",
+      "lighting": "Lampu neon di atas silau di belakang Mas Dimas, membuat area wajah/dada jatuh dalam bayangan paling gelap di dapur",
       "on_screen_text": "MODE TERBANG"
     },
     {
@@ -147,14 +169,16 @@
       "est_duration_sec": 5.5,
       "vo_text": "Dan kebetulan, bayangan paling gelap di dapur ini ada tepat di mukanya. Maaf ya, bang.",
       "vo_delivery": "Santai, usil, tengil penuh kemenangan pada 'Maaf ya, bang'",
-      "camera_motion": "Melesat lurus menukik cepat tepat ke arah wajah siluet manusia yang langsung menjatuhkan sandalnya",
-      "visual_action": "Kamera ngebut menuju wajah manusia. Manusia terbelalak, sandal jepit terlepas jatuh, dan tepat 0.2 detik sebelum menabrak wajah—LAYAR HITAM mendadak.",
-      "assets_used": ["human_silhouette_giant", "sandal_jepit_swallow"],
+      "camera_archetype": "aerial_erratic",
+      "motion_modifiers": ["erratic_wobble", "rapid_wing_flutter"],
+      "camera_motion": "Menukik cepat (aerial_erratic) ke wajah kaget berkacamata Mas Dimas di upper-third safe-zone -> cut to black",
+      "visual_action": "Sayap cokelat-amber semi-transparan bergetar di tepi frame (identik dengan Scene 7). Wajah kaget berkacamata hitam matte Mas Dimas berada di upper-third (aman dari subtitle MarginV=380) dalam bayangan gelap kontras + rim light tajam, kaus JADI APA terlihat, dan sandal jepit hijau mulai terlepas jatuh dari tangan kanannya sebelum LAYAR HITAM mendadak.",
+      "assets_used": ["mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "wings_buzz_loud", "offset_sec": 0.0},
         {"sfx_id": "human_scream_cut", "offset_sec": 4.7}
       ],
-      "lighting": "Kontras dramatis di wajah manusia -> Cut to Black di detik 5.2",
+      "lighting": "Bayangan gelap dramatis di wajah Mas Dimas + rim light tajam -> Cut to Black",
       "on_screen_text": "MAAF YA BANG"
     }
   ]

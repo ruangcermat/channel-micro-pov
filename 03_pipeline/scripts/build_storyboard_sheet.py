@@ -96,15 +96,15 @@ def _wrap_pixel_lines(
 def _compact_action_summary(sid: int, sub_tag: Optional[str], scene_spec: Dict[str, Any]) -> str:
     """Concise 1-line Indonesian Aksi & Kamera summary tailored for mobile/studio storyboard reading."""
     overrides = {
-        (1, "A"): "Remang biru jam 2 pagi; POV lantai 1,5 cm, bayangan kecoak di kuah mi, rak kosan terlihat.",
-        (1, "B"): "Lampu neon menyala mendadak; kamera tersentak ke atas, abang nyeker bungkuk melotot.",
-        (2, None): "Low-angle zoom patah-patah; siluet abang bungkuk mengincar, sandal Swallow datar siap geplak.",
-        (3, None): "Bullet-time slow-mo miring; sandal mulai mengayun turun + garis angin cyan ke antena.",
-        (4, None): "Sandal ijo baru menghantam lantai + debu di tepi kamera; kamera miring ngebut 300 km/jam.",
-        (5, None): "Sprint lurus menuju kolong kulkas 5,5 cm; kaki nyeker raksasa turun menutup jalur.",
-        (6, None): "Rem mendadak & whip-pan kiri-kanan-atas; kaki nyeker nutup kolong, sandal siap jatuh.",
-        (7, None): "Sayap amber berurat terbuka di tepi lensa; kamera lepas landas oleng naik ke arah abang.",
-        (8, None): "Menukik ke muka abang berbayang gelap kontras (rim light tajam); sandal lepas -> layar hitam.",
+        (1, "A"): "Remang biru + specular kuah & bayangan kecoak; Mas Dimas di saklar kiri memakai 2 sandal ijo.",
+        (1, "B"): "Lampu nyala + snap_jerk; Mas Dimas baru tekan saklar & kaget (2 sandal di kaki, tangan kosong).",
+        (2, None): "Low-angle + handheld_breath; Mas Dimas bungkuk backswing sandal kanan (kaki kanan nyeker, kiri bersandal).",
+        (3, None): "Bullet-time miring; sandal kanan mengayun datar ke bawah + angin cyan membengkokkan antena.",
+        (4, None): "Sandal kanan menghantam lantai + debu tipis + impact_bump & fov_rush 95°->112° menuju kulkas.",
+        (5, None): "Sprint lurus ke kolong kulkas 5,5 cm; kaki KIRI Mas Dimas (bersandal ijo) menghentak menutup jalur.",
+        (6, None): "Whip-pan kiri-kanan-atas; kaki kiri bersandal blokir kolong, tangan kanan backswing sandal siap geplak.",
+        (7, None): "Sayap amber berurat rapid flutter di tepi lensa; kamera aerial_erratic oleng naik ke arah Mas Dimas.",
+        (8, None): "Wajah berkacamata Mas Dimas di upper-third (bayangan gelap + rim tajam), sandal lepas, sayap amber.",
     }
     if (sid, sub_tag) in overrides:
         return overrides[(sid, sub_tag)]
@@ -135,8 +135,8 @@ def _build_panel_specs(
             "image_path": scenes_dir / "scene_01a.png",
             "action": _compact_action_summary(1, "A", s1),
             "vo": "Jam dua pagi...",
-            "sfx_bgm": "SFX: ambient malam | BGM: sneaky_night_loop",
-            "accent": (96, 165, 250),  # cool moonlight blue
+            "sfx_bgm": "SFX: ambient malam | Room: night_fridge_hum (-32dB) | BGM: sneaky_night_loop",
+            "accent": (96, 165, 250),
         }
     )
 
@@ -150,19 +150,18 @@ def _build_panel_specs(
             "action": _compact_action_summary(1, "B", s1),
             "vo": "Lampu dapur mendadak nyala. Masalahnya, kamu lagi jadi kecoak yang kepergok nyeruput kuah mi.",
             "sfx_bgm": "SFX: light_switch_click (1.0s), fluorescent_hum (1.1s) | BGM: sneaky_night_loop",
-            "accent": (250, 204, 21),  # flash yellow
+            "accent": (250, 204, 21),
         }
     )
 
-    # Panels 3..9: Scene 02 .. Scene 08
     accents = {
-        2: (248, 113, 113),  # boss red
-        3: (34, 211, 238),   # cheat code cyan
-        4: (74, 222, 128),   # sprint green
-        5: (251, 146, 60),   # tense orange
-        6: (244, 63, 94),    # trapped crimson
-        7: (245, 158, 11),   # amber wings
-        8: (192, 132, 252),  # comedic climax violet
+        2: (248, 113, 113),
+        3: (34, 211, 238),
+        4: (74, 222, 128),
+        5: (251, 146, 60),
+        6: (244, 63, 94),
+        7: (245, 158, 11),
+        8: (192, 132, 252),
     }
     for sid in range(2, 9):
         if sid not in smap or sid not in tmap:
@@ -218,9 +217,8 @@ def build_storyboard_sheet(
     canvas = Image.new("RGB", (canvas_w, canvas_h), (10, 14, 24))
     draw = ImageDraw.Draw(canvas)
 
-    # Fonts
-    f_header = _load_font(30, bold=True)
-    f_sub = _load_font(16, bold=False)
+    f_header = _load_font(28, bold=True)
+    f_sub = _load_font(15, bold=False)
     f_badge = _load_font(18, bold=True)
     f_card_title = _load_font(15, bold=True)
     f_card_title_sm = _load_font(13, bold=True)
@@ -232,17 +230,19 @@ def build_storyboard_sheet(
     draw.rectangle([(0, 0), (canvas_w, margin_top - 16)], fill=(15, 23, 42))
     draw.rectangle([(0, margin_top - 19), (canvas_w, margin_top - 16)], fill=(250, 204, 21))
 
+    channel = spec.get("channel", "Jadi Apa")
+    mascot = spec.get("mascot", "Mas Dimas")
     ep_id = spec.get("episode_id", "EP001")
     ep_title = spec.get("title", "3D Micro-POV Storyboard")
     total_dur = float(manifest.get("total_duration_sec", 0.0))
     fps = int(manifest.get("fps", 24))
     vo_speed = float(manifest.get("vo_speed", 1.0))
 
-    draw.text((margin_x, 20), f"{ep_id} STORYBOARD SHEET — {ep_title}", fill=(248, 250, 252), font=f_header)
+    draw.text((margin_x, 18), f"{channel.upper()} — {ep_id} STORYBOARD SHEET: {ep_title}", fill=(248, 250, 252), font=f_header)
     draw.text(
-        (margin_x, 60),
-        f"9 Panels (01A–08)  |  Durasi Audio-First: {total_dur:.2f}s ({int(manifest.get('total_frames', 0))} fr @ {fps}fps)  |  "
-        f"VO: Gemini 3.8 Flash TTS ({manifest.get('voice_name', 'Puck')}, {vo_speed:.2f}x)  |  Look: MPFB2 + AgX + Macro DOF + post.py",
+        (margin_x, 58),
+        f"Maskot: {mascot}  |  9 Panel (01A–08)  |  Durasi: {total_dur:.2f}s ({int(manifest.get('total_frames', 0))} fr @ {fps}fps)  |  "
+        f"VO: Puck ({vo_speed:.2f}x) + faster-whisper + Room Tone -32dB  |  AgX + Macro DOF + post.py",
         fill=(148, 163, 184),
         font=f_sub,
     )

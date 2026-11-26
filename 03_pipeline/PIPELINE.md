@@ -1,70 +1,46 @@
-# PIPELINE SOP — CHANNEL MICRO-POV CLOUD PRODUCTION ENGINE (ZACK-BLENDER-PACK)
+# PIPELINE SOP — JADI APA 3D MICRO-POV STUDIO ENGINE (v2.0)
 
-Dokumen ini adalah panduan arsitektur baku untuk memproduksi episode **3D Micro-POV Indonesia** (`epXXX_spec.json` → `final_epXXX.mp4`) **100% di cloud (Google Colab T4 / Kaggle GPU T4 x2 + Google Drive cache)** tanpa ketergantungan laptop lokal (RAM 4GB) dan tanpa langkah manual.
-
----
-
-## 1. Prinsip Utama — Zero-Manual & Satu Pintu
-- **100% Cloud:** Semua fetch aset, TTS, render Blender 5.2.2 headless, `post.py`, subtitle `.ass`, dan mixing FFmpeg jalan di Colab atau Kaggle.
-- **Repo GitHub Ringan:** File media berat (`.blend`, `.mp4`, `.wav`, `.mp3`, `.hdr`, frame render > 25 MB) diabaikan oleh `.gitignore` dan disimpan di Google Drive (`/content/drive/MyDrive/channel-micro-pov/`).
-- **Skill Pack Terintegrasi:** Referensi resmi `skills/zack-3d-short/`, `skills/blender-walk-example/`, dan `skills/blender-render-farm/` tersimpan langsung di repo untuk dokumentasi, helper posing (`doc_pose.py`), kamera look (`post.py`), dan switch engine (`eevee_switch.py`).
+Dokumen ini adalah SOP produksi modular **100% Cloud** untuk channel **Jadi Apa** (**Jadi Apa 3D**) dengan karakter maskot permanen **Mas Dimas** (`EP001–EP100+`). Lihat kitab teknis lengkap di [`MICRO_POV_STUDIO_SKILL.md`](MICRO_POV_STUDIO_SKILL.md).
 
 ---
 
-## 2. Spesifikasi Output Wajib
-- **Resolusi:** `1080×1920` (Vertikal 9:16; preview `540×960`, storyboard `360×640`)
-- **Frame Rate:** `24 fps` (default cepat & sinematik, hemat 20% frame vs 30 fps)
-- **Codec Video:** H.264 (`libx264`), pixel format `yuv420p`, `+faststart`
-- **Color Management & Camera Look:** **AgX** (`AgX - Medium High Contrast`, exposure `-0.45`) + Macro DOF (`f/2.8–4.0`) + pass `skills/blender-render-farm/scripts/post.py` (soft lens 35%, highlight glow, vignette 28%, luma film grain)
-- **Audio:** AAC 192 kbps, 48 kHz stereo, normalisasi loudness `-14 LUFS` (VO `-6 dB`, SFX `-10 dB` dengan override presisi, BGM `-22 dB` dengan `sidechaincompress` auto-ducking)
-- **Subtitle `.ass`:** `PlayResX: 1080`, `PlayResY: 1920`, `WrapStyle: 2`, Bold `56pt`, `Outline=5`, `Shadow=2`, `MarginL=95`, `MarginR=95`, `MarginV=380`, maksimal **2–3 kata (~16–18 karakter)** per baris.
+## 1. Arsitektur Modular 3 Lapisan
+1. **Universal Studio Core (`03_pipeline/core/`):**
+   - `camera_presets.py` (5 arketipe kamera POV: `insect_ground`, `aerial_erratic`, `fluid_float`, `static_object_pov`, `human_first_person` + beat modifiers + motion blur `shutter=0.40`)
+   - `mpfb_helpers.py` & `paint_mas_dimas_tex.py` (Master permanen **Mas Dimas**: kaus Crimson `#A62C2B` bertuliskan **`JADI APA`**, kacamata kotak hitam matte tanpa silau, celana pendek gelap, nyeker, Leg IK, `reach()`, `snap_sandal_to_foot()`, `snap_sandal_to_right_hand()`)
+   - `lighting_utils.py` (AgX Medium High Contrast, Cycles multi-GPU + OIDN, EEVEE auto-fallback, 2-Gate presets)
+   - `post.py` (`skills/blender-render-farm/scripts/post.py` soft lens + glow + vignette + film grain)
+   - `audio_utils.py` (`faster-whisper` word-level subtitle timestamps, micro-fade `15 ms`, dynamic `room_tone -32 dB`)
+2. **Generic Runners (`03_pipeline/scripts/`):**
+   - `build_and_render.py` memuat secara dinamis `04_episodes/<ep>/scene_builder.py` (produksi EP002+ mustahil merusak EP001!).
+   - `generate_tts.py`, `prepare_audio.py`, `compose_final.py`, `build_storyboard_sheet.py`, `fetch_assets.py`.
+3. **Isolated Episode Builder (`04_episodes/epXXX_<slug>/`):**
+   - `epXXX_spec.json` + `scene_builder.py` khusus staging & koreografi episode tersebut.
 
 ---
 
-## 3. Arsitektur 5 Tahap (Audio-First + MPFB2)
+## 2. 2 HARD GATE PRODUKSI (WAJIB DIPATUHI)
 
-### Tahap 1 — Auto-Fetch Aset CC0 & Sync Rig MPFB2 (`fetch_assets.py`)
-1. Menemukan `family_ready.blend` otomatis dari Google Drive (`/content/drive/MyDrive/Skill referensi/Zack Blender Pack/Zack-Blender-Pack/zack-3d-short/ready/family_ready.blend` atau `05_skills_ref/...`) atau `/kaggle/input/**`, lalu menyalinnya ke cache proyek `02_assets/models_3d/family_ready.blend`.
-2. Mengunduh & men-cache **15 properti dapur nyata Poly Haven CC0** (`modern_wooden_cabinet`, `Shelf_01`, `cardboard_box_01`, `wooden_bowl_01/02`, `pot_enamel_01`, `brass_pan_01`, `metal_jug`, `jug_01`, `tea_set_01`, `electric_stove`, `wooden_cutting_board`, `WoodenChair_01`, `wicker_basket_02`, `wall_clock`), **3 tekstur PBR** (`interior_tiles`, `painted_plaster_wall`, `kitchen_wood`), dan **HDRI ruangan** (`small_empty_room_3`).
+### HARD GATE 1 — STORYBOARD (`--mode storyboard`)
+- Render hero frames (`450×800`, 12 samples Cycles + `post.py`) dan tampilkan **`storyboard_sheet.png`** (9 panel lengkap dengan kartu *Scene & Waktu*, *Aksi & Kamera*, *VO*, dan *SFX / BGM*).
+- **ATURAN KERAS:** **DILARANG** menyiapkan baking penuh 24fps atau menjalankan render Colab/Kaggle sebelum user membalas secara eksplisit: **`ACC STORYBOARD`**.
 
-### Tahap 2 — Audio-First Voiceover & Pacing (`generate_tts.py`)
-- Menggunakan **Gemini 3.8 Flash TTS** (`gemini-3.8-flash-tts`, fallback `gemini-3.8-flash-lite-tts`, voice `Puck`) dengan pemisahan ketat `vo_text` vs `speech_metadata.style`.
-- Mendukung `--skip-existing` (menggunakan ulang cache VO di Drive tanpa memanggil API atau membutuhkan `GEMINI_API_KEY` jika seluruh WAV sudah tersedia).
-- Default pacing ketat: `--fps 24`, `--pad-sec 0.06`, `--vo-speed 1.08` (memadatkan `EP001` dari 53 detik ke ~47–48 detik).
-- Sinkronisasi presisi:
-  - Scene 6: `vo_delay_sec = 0.15` agar `record_scratch` (`0.0s`, `0.25s`, `-14 dB`) tidak menimpa kata *"kaki"*.
-  - Scene 8: `scream_offset_sec = audio_duration_sec + 0.05` (setelah *"Maaf ya, bang"* selesai), diikuti `cut_to_black_sec = scream_offset_sec + 0.35`.
-
-### Tahap 3 — SFX & BGM CC0 (`prepare_audio.py`)
-- Mengunduh SFX CC0/Public Domain terverifikasi (Wikimedia Commons) + synthesizer procedural Python (`numpy`/`scipy`) untuk 100% zero-failure.
-- `wings_buzz_loud` dihaluskan dengan low-pass `1.8 kHz` dan level `-16 dB` agar tidak menutupi narasi VO.
-
-### Tahap 4 — Blender 5.2.2 Scene Assembly, MPFB2 Acting & Render (`build_and_render.py` + `mpfb_human.py`)
-- **Karakter Manusia Asli MPFB2 (`mpfb_human.py`):**
-  - Membuka `family_ready.blend` (100% tekstur ter-pack), membuang studio & karakter non-perlu, merestyle pakaian kosan gelap (*kaus oblong* + celana gelap, `Displace 0.006`), `ENHANCED_SSS` matte skin, dan `fix_teeth.py` (gigi/gusi natural).
-  - **Aturan Anti-Bug Wajib (`TROUBLESHOOTING.md`):**
-    - JANGAN pernah me-reset shape key `$md-*` (hanya animasikan `!ex-*`).
-    - Selalu pose lengan/tangan/kaki memakai `doc_pose.py` + world-space `reach()` + Leg IK terkalibrasi (tidak pernah A-pose kaku).
-    - Ekspresi ARKit (`glare`/`angry`/`shock`/`panic`) menggunakan `BOOST = 1.6` + rotasi tulang `jaw` (`17° × jaw`).
-    - **Sandal Anti-Melayang:** Setiap frame di Scene 1–7, `sandal_jepit_swallow` dihitung langsung dari frame telapak `wrist.R` (`wrist.head + palm_dir * 0.055 * scale + palm_normal * 0.045 * scale`) dan baru dilepas jatuh dengan gravitasi di Scene 8.
-- **Set Dapur Padat & Lighting "Jam 2 Pagi":**
-  - Albedo tembok/keramik/kulkas dibatasi `<= 0.56–0.62`, ambient biru malam `0.05–0.09`, flash neon di detik 1.05, backlight kuat dari belakang-atas karakter agar muka jatuh dalam bayangan kontras dramatis.
-  - Sayap kecoak cokelat-amber transparan (`Alpha ~0.35`, berurat halus) di-parent langsung di sudut kiri-kanan bawah lensa kamera POV.
-- **Engine Fleksibel & Auto-Resume:**
-  - `--engine CYCLES`: otomatis pakai seluruh GPU NVIDIA (`OPTIX → CUDA` pada Colab T4 / Kaggle 2×T4) + Adaptive Sampling + `OPENIMAGEDENOISE` (anti-crash T4) + fallback CPU aman.
-  - `--engine EEVEE`: mengadopsi `skills/blender-render-farm/scripts/eevee_switch.py` untuk render cepat 2–6 detik/frame.
-  - Auto-resume melewati otomatis `frame_XXXX.png` berukuran `> 10 KB`.
-  - Automated QC (`run_qc_checks`) memverifikasi `MISSING=[]`, zero unparented `Human.*`, `$md-*` intact, jarak grip sandal `< 0.25m`, dan camera raycast bersih sebelum render.
-
-### Tahap 5 — Subtitle `.ass` & Final Mixing (`compose_final.py`)
-- Menggabungkan `scene_01.mp4 .. scene_0N.mp4`, membuat subtitle `.ass` 9:16 anti-terpotong, mencampur VO + SFX + BGM auto-ducking `-14 LUFS`, lalu mengekspor `animatic_epXXX.mp4` / `preview_epXXX.mp4` / `final_epXXX.mp4`.
+### HARD GATE 2 — MOTION CHECK (`--mode motion_check`)
+- Hanya dijalankan **setelah** user memberi `ACC STORYBOARD`.
+- Merender full 24fps resolusi ringan (`360×640`, 8 samples, `EEVEE` dengan auto-fallback `Cycles` 8-sample jika headless Linux tidak mendukung EGL, `use_motion_blur=True`, `shutter=0.40`) lalu menyusun `motion_check_epXXX.mp4` lengkap dengan VO (`15 ms` micro-fade), SFX, `room_tone -32 dB`, BGM auto-ducking, dan subtitle `faster-whisper`.
+- Digunakan untuk verifikasi rasa gerak POV, timing komedi, dan safe-zone 9:16 sebelum masuk render **`final`** (`1080×1920`, 24fps, 24 samples di Kaggle GPU T4 x2 / Colab T4).
 
 ---
 
-## 4. Notebook 1-Click Cloud
-1. **Google Colab (T4 GPU + Drive):** `03_pipeline/render_episode_colab.ipynb` — cocok untuk storyboard QC, preview, revisi parsial (`SINGLE_SCENE = N`), maupun final render yang langsung tersimpan ke Google Drive.
-2. **Kaggle GPU T4 x2 (Unattended Commit):** `03_pipeline/render_episode_kaggle.ipynb` — cocok untuk render final penuh (`Save Version → Save & Run All (Commit)`) yang bisa ditinggal tutup browser sampai `final_ep001.mp4` selesai di tab Output.
+## 3. Spesifikasi Output & Audio-First
+- **Resolusi:** `1080×1920` (9:16 final), `540×960` (preview), `360×640` (`motion_check`), `450×800` (stills `storyboard`).
+- **Frame Rate:** `24 fps` + `use_motion_blur = True` (`shutter = 0.40`) pada mode video.
+- **Audio:** Gemini 3.8 Flash TTS (`Puck`, `SKIP_EXISTING_VO=True`, `VO_SPEED=1.08`), micro-fade `15 ms` per clip WAV, `room_tone` dinamis `-32 dB`, SFX `-10 dB`, BGM `-22 dB` auto-ducking, master `-14 LUFS` (AAC 192 kbps, 48 kHz stereo).
+- **Subtitle `.ass`:** `PlayResX: 1080`, `PlayResY: 1920`, `MarginL/R: 95`, `MarginV: 380`, Bold `56pt`, `Outline=5`, 2–3 kata per chunk berbasis `faster-whisper` word-level timestamps.
+- **Master Karakter Permanen:** `02_assets/models_3d/mas_dimas_ready.blend` (tersimpan di Google Drive & otomatis terdeteksi di Colab/Kaggle).
 
-## 5. Aturan Revisi Parsial
-Untuk merevisi satu adegan saja (misalnya adegan 4):
-- Set `SINGLE_SCENE = 4` di notebook (atau `--scene 4` di CLI) untuk merender ulang hanya frame `scene_04`, lalu jalankan `compose_final.py` untuk merakit ulang `.mp4` final dalam hitungan detik.
+---
+
+## 4. Notebook Cloud 1-Click
+1. **Google Colab (T4 GPU + Drive):** `03_pipeline/render_episode_colab.ipynb` — mendukung `storyboard`, `motion_check`, `preview`, `final`, dan revisi parsial `SINGLE_SCENE = N`.
+2. **Kaggle GPU T4 x2 (Unattended Commit):** `03_pipeline/render_episode_kaggle.ipynb` — ideal untuk render `final` 1080×1920 tanpa perlu menjaga browser tetap terbuka.
