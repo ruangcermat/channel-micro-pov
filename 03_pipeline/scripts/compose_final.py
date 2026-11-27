@@ -186,19 +186,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         vo_dur = max(0.35, float(scene["audio_duration_sec"]))
         s_end = float(scene["end_sec"])
         vo_text = scene.get("vo_text", "").strip()
-        badge = scene.get("on_screen_text", "").strip()
         wav_path = _resolve_vo_wav(scene, work_dir=work_dir)
 
-        if badge:
-            is_final_scene = sc_idx == total_scenes - 1
-            if not is_final_scene:
-                b_start = s_start
-                b_end = min(s_end - 0.10, s_start + 1.65)
-                if b_end > b_start + 0.25:
-                    pop = r"{\fad(80,140)\t(0,90,\fscx106\fscy106)\t(90,170,\fscx100\fscy100)}"
-                    events.append(
-                        f"Dialogue: 0,{_fmt_ass_time(b_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
-                    )
+        # Top yellow badges (`on_screen_text`) are permanently DISABLED across Scene 01–08
+        # to prevent double-text clashes with bottom karaoke subtitles (e.g. "JAM 2 PAGI" vs "JAM DUA PAGI.").
 
         if not vo_text:
             continue

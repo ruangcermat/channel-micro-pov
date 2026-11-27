@@ -4,18 +4,19 @@
 ZERO episode-specific hardcoding! Dynamically loads `<episode_dir>/scene_builder.py` so
 producing EP002–EP100+ can NEVER break EP001.
 
-Usage (Blender 5.2.2 Linux headless):
-  blender --background --python 03_pipeline/scripts/build_and_render.py -- \\
+Usage (Blender 5.2.2 Linux headless — Colab T4 Fast Local Pipeline):
+  LD_PRELOAD="" blender --background --python-exit-code 1 \\
+      --python 03_pipeline/scripts/build_and_render.py -- \\
+      --cycles-device CUDA \\
       --spec 04_episodes/ep001_kecoak_dapur/ep001_spec.json \\
-      --mode final --engine CYCLES_FAST --frames-dir /tmp/render_frames/ep001_kecoak_dapur
+      --mode final --frames-dir /tmp/render_frames/ep001_kecoak_dapur
 
-Production Modes:
-- `storyboard`   (Gate 1): Fast hero frames (270x480, 4 samples, post.py) -> `storyboard_sheet_*.png`
-- `motion_check` (Legacy): Full 24fps (360x640, 8 samples, EEVEE w/ Cycles fallback)
-- `preview`              : Full 24fps (540x960, 10 samples, FFmpeg post-look)
-- `final`                : Full 24fps (1080x1920, Cycles Fast OptiX 10 samples + adaptive 0.05 +
-                           volume_bounces=0 + persistent data, or EEVEE < 5 min; PNGs rendered strictly
-                           to local `--frames-dir /tmp/render_frames/`, FFmpeg post-look in compose_final.py)
+Colab T4 Production Standard:
+- Pure Cycles `CUDA` GPU ONLY (ZERO CPU mix, ZERO EEVEE llvmpipe, ZERO OptiX black-frame denoiser!)
+- Stable GPU Denoiser: `OPENIMAGEDENOISE` (`RGB_ALBEDO_NORMAL`, `FAST`, `denoising_use_gpu=True`)
+- Sampling & I/O: `12` adaptive samples (`0.05` / min `4`), `max_bounces=4`, `volume_bounces=0`,
+  `caustics=OFF`, `sample_clamp_indirect=10.0`, `texture_limit_render='1024'`, `PNG compression=0`
+- Pre-Flight Guard Frame 1: renders Frame 1 to `/tmp/`, fails fast if brightness `< 3.0` or 0 CUDA GPUs!
 """
 
 from __future__ import annotations
@@ -30,7 +31,11 @@ import time as _time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Prevent Colab tcmalloc preload conflicts inside Blender / Cycles CUDA subprocesses
+os.environ["LD_PRELOAD"] = ""
+
 import bpy
+import numpy as np
 from mathutils import Vector
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -169,8 +174,99 @@ def run_qc_checks(
 
 
 # =============================================================================
-# RESILIENT FRAME RENDERER (OPTIX -> OIDN GPU -> CUDA GPU; ZERO SILENT CPU FALLBACK!)
+# PRE-FLIGHT GUARD FRAME 1 (FAIL-FAST BLACK FRAME / NO CUDA GPU) & PURE CUDA RENDERER
 # =============================================================================
+
+def _measure_png_mean_brightness(png_path: Path) -> float:
+    """Measure mean RGB pixel brightness (0..255) using PIL+numpy or Blender native image loader+numpy."""
+    try:
+        from PIL import Image  # type: ignore
+
+        with Image.open(png_path) as im:
+            arr = np.asarray(im.convert("RGB"), dtype=np.float32)
+            return float(arr.mean())
+    except Exception:
+        pass
+
+    img = bpy.data.images.load(str(png_path), check_existing=False)
+    try:
+        w, h = img.size[0], img.size[1]
+        ch = img.channels
+        buf = np.empty(w * h * ch, dtype=np.float32)
+        img.pixels.foreach_get(buf)
+        rgb = buf.reshape(-1, ch)[:, :3]
+        return float(rgb.mean() * 255.0)
+    finally:
+        bpy.data.images.remove(img)
+
+
+def run_preflight_guard_frame1(
+    scene: bpy.types.Scene,
+    tmap: Dict[int, Dict[str, Any]],
+    scenes_out_dir: Path,
+    total_frames: int,
+    strict_cuda: bool = True,
+) -> float:
+    """Render Scene 01 Frame 1 to /tmp/ and abort immediately if black (< 3.0) or 0 active CUDA GPUs."""
+    active_cuda: List[str] = []
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        active_cuda = [d.name for d in prefs.devices if d.type == "CUDA" and d.use]
+    except Exception:
+        active_cuda = []
+
+    if strict_cuda and not active_cuda:
+        raise RuntimeError("PREFLIGHT FAILED: Black frame or no CUDA GPU")
+
+    first_sid = min(tmap.keys())
+    first_frame = int(tmap[first_sid]["start_frame"])
+    preflight_png = Path("/tmp/preflight_frame_0001.png")
+    if preflight_png.exists():
+        preflight_png.unlink()
+
+    log(
+        "PREFLIGHT",
+        f"Testing Frame {first_frame} (Scene {first_sid:02d}) on CUDA GPU {active_cuda or ['CPU']} -> {preflight_png}...",
+    )
+    dt = _render_single_frame_resilient(
+        scene,
+        first_frame,
+        preflight_png,
+        apply_post=False,
+        strict_no_cpu=strict_cuda,
+    )
+    if not preflight_png.exists() or preflight_png.stat().st_size < 10_240:
+        raise RuntimeError("PREFLIGHT FAILED: Black frame or no CUDA GPU")
+
+    mean_brightness = _measure_png_mean_brightness(preflight_png)
+    if mean_brightness < 3.0:
+        try:
+            preflight_png.unlink()
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"PREFLIGHT FAILED: Black frame or no CUDA GPU (Frame {first_frame} brightness={mean_brightness:.2f}/255 < 3.0)"
+        )
+
+    # Reuse the verified Frame 1 in Scene 01 frames dir so we never render Frame 1 twice!
+    s1_frames_dir = scenes_out_dir / f"scene_{first_sid:02d}_frames"
+    s1_frames_dir.mkdir(parents=True, exist_ok=True)
+    target_f1 = s1_frames_dir / f"frame_{first_frame:04d}.png"
+    shutil.copy2(preflight_png, target_f1)
+    try:
+        preflight_png.unlink()
+    except OSError:
+        pass
+
+    est_total_min = (total_frames * dt) / 60.0
+    log(
+        "PREFLIGHT",
+        f"PASS! Frame {first_frame} = {dt:.2f}s | Brightness = {mean_brightness:.1f}/255 | "
+        f"CUDA GPU = {', '.join(active_cuda) if active_cuda else 'CPU'} | "
+        f"Est. total ({total_frames} frames) ~{est_total_min:.1f} min",
+    )
+    return dt
+
 
 def _render_single_frame_resilient(
     scene: bpy.types.Scene,
@@ -185,62 +281,22 @@ def _render_single_frame_resilient(
     try:
         bpy.ops.render.render(write_still=True)
     except Exception as exc:
-        if scene.render.engine == "CYCLES":
-            log("WARN", f"Frame {frame} Cycles render failed ({exc}); trying GPU recovery...")
-            recovered = False
-            # Stage 1: If OPTIX denoiser failed on a specific T4 driver, keep OPTIX GPU raytracing & switch denoiser -> OIDN!
-            if getattr(scene.cycles, "denoiser", "") == "OPTIX":
-                try:
-                    scene.cycles.denoiser = "OPENIMAGEDENOISE"
-                    try:
-                        scene.cycles.denoising_use_gpu = scene.cycles.device == "GPU"
-                    except Exception:
-                        pass
-                    bpy.ops.render.render(write_still=True)
-                    log("RENDER", f"Recovered frame {frame} via OPTIX GPU + OPENIMAGEDENOISE")
-                    recovered = True
-                except Exception:
-                    pass
-
-            if not recovered:
-                prefs = bpy.context.preferences.addons["cycles"].preferences
+        # Never use OptiX denoiser and NEVER fall back Cycles raytracing to CPU when strict_no_cpu=True!
+        # Only retry once with OIDN CPU denoising (keeping Cycles path tracing 100% on CUDA GPU) if OIDN GPU failed.
+        if scene.render.engine == "CYCLES" and getattr(scene.cycles, "denoising_use_gpu", False):
+            log("WARN", f"Frame {frame} OIDN GPU failed ({exc}); retrying with CUDA GPU raytracing + OIDN CPU...")
+            try:
                 scene.cycles.denoiser = "OPENIMAGEDENOISE"
-                backends = ("CUDA",) if strict_no_cpu else ("CUDA", None)
-                for backend in backends:
-                    try:
-                        if backend:
-                            prefs.compute_device_type = backend
-                            if hasattr(prefs, "get_devices"):
-                                prefs.get_devices()
-                            prefs.refresh_devices()
-                            gpu_devs = [d for d in prefs.devices if d.type == backend]
-                            if not gpu_devs:
-                                continue
-                            for d in prefs.devices:
-                                d.use = d.type == backend
-                            scene.cycles.device = "GPU"
-                        else:
-                            scene.cycles.device = "CPU"
-                        try:
-                            scene.cycles.denoising_use_gpu = False
-                        except Exception:
-                            pass
-                        bpy.ops.render.render(write_still=True)
-                        log("RENDER", f"Recovered frame {frame} via {backend or 'CPU'} + OIDN")
-                        recovered = True
-                        break
-                    except Exception:
-                        continue
-            if not recovered:
+                scene.cycles.denoising_use_gpu = False
+                bpy.ops.render.render(write_still=True)
+                log("RENDER", f"Recovered frame {frame} via CUDA GPU + OIDN CPU")
+            except Exception as exc2:
                 raise RuntimeError(
-                    f"Cycles GPU render gagal pada frame {frame} ({exc}). "
-                    f"Skrip dihentikan agar TIDAK jatuh diam-diam ke CPU!"
-                ) from exc
+                    f"PREFLIGHT FAILED: Black frame or no CUDA GPU — CUDA render gagal pada frame {frame}: {exc2}"
+                ) from exc2
         else:
-            # STRICT RULE: EEVEE must NEVER silently fall back to Cycles CPU (14 min/frame)!
             raise RuntimeError(
-                f"EEVEE ({scene.render.engine}) render gagal pada frame {frame}: {exc}. "
-                f"Skrip dihentikan (TIDAK fallback diam-diam ke Cycles CPU)!"
+                f"PREFLIGHT FAILED: Black frame or no CUDA GPU — render gagal pada frame {frame}: {exc}"
             ) from exc
 
     if apply_post and out_png.exists():
@@ -575,15 +631,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mas-dimas-blend", type=str, default=None, help="Override path to mas_dimas_ready.blend")
     parser.add_argument("--family-blend", type=str, default=None, help="Override fallback path to family_ready.blend")
     parser.add_argument(
+        "--cycles-device",
+        type=str,
+        default=None,
+        help="Blender CLI Cycles device passthrough flag (e.g. -- --cycles-device CUDA)",
+    )
+    parser.add_argument(
         "--mode",
         choices=["storyboard", "motion_check", "preview", "final"],
-        default="storyboard",
+        default="final",
     )
     parser.add_argument(
         "--engine",
-        choices=["EEVEE", "CYCLES_GPU", "CYCLES_FAST", "CYCLES", "AUTO"],
-        default="EEVEE",
+        choices=["CYCLES_CUDA", "CYCLES_GPU", "CYCLES_FAST", "CYCLES", "CYCLES_CPU"],
+        default="CYCLES_CUDA",
     )
+    parser.add_argument("--allow-cpu", action="store_true", help="Allow CPU rendering (local sandbox storyboard QC only)")
+    parser.add_argument("--skip-preflight", action="store_true", help="Skip Pre-Flight Guard Frame 1 check")
     parser.add_argument("--scene", type=int, default=None, help="Render ONLY a single scene_id")
     parser.add_argument("--save-blend", action="store_true", help="Pack & save assembled .blend file")
     parser.add_argument("--bake-all", action="store_true", help="Force full frame-by-frame bake even in storyboard mode")
@@ -599,19 +663,19 @@ def parse_args() -> argparse.Namespace:
         "--frame-step",
         type=int,
         default=1,
-        help="Render every K-th frame (default 1 = full 24fps on GPU; >1 for fast CPU stepped playblast held at 24fps)",
+        help="Render every K-th frame (default 1 = full 24fps on GPU; >1 for fast stepped playblast held at 24fps)",
     )
     parser.add_argument(
         "--max-frames",
         type=int,
         default=0,
-        help="Limit rendered frames per scene (0 = all; e.g. 3 for 3-frame EEVEE smoke test)",
+        help="Limit rendered frames per scene (0 = all; e.g. 2 for smoke test)",
     )
     parser.add_argument(
         "--samples",
         type=int,
         default=0,
-        help="Optional sample override (0 = use mode preset: 16 EEVEE final, 10 CYCLES_GPU final)",
+        help="Optional Cycles sample override (0 = use mode preset: 12 final, 10 preview, 4 storyboard)",
     )
     return parser.parse_args(extra)
 
@@ -649,6 +713,7 @@ def main() -> int:
         return 1
     manifest = load_json(timing_path)
     fps = int(manifest.get("fps", 24))
+    total_frames = int(manifest.get("total_frames", 1))
 
     ep_builder = load_episode_scene_builder(spec_path)
     log("RUNNER", f"Loaded isolated episode builder: {ep_builder.__file__}")
@@ -656,15 +721,19 @@ def main() -> int:
 
     human = mh.load_mpfb2_human_base(mas_dimas_blend, target_height_m=1.68)
     scene = bpy.context.scene
-    engine_info = lgt_lib.configure_render_engine(scene, args.engine, args.mode, fps, log_fn=log)
+    allow_cpu = bool(args.allow_cpu or args.engine.upper() == "CYCLES_CPU")
+    engine_info = lgt_lib.configure_render_engine(
+        scene,
+        args.engine,
+        args.mode,
+        fps,
+        log_fn=log,
+        allow_cpu=allow_cpu,
+    )
     strict_no_cpu = bool(engine_info.get("strict_no_cpu", True))
     if args.samples and args.samples > 0:
-        if scene.render.engine == "CYCLES":
-            scene.cycles.samples = int(args.samples)
-            log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
-        elif hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
-            scene.eevee.taa_render_samples = int(args.samples)
-            log("BLENDER", f"Sample override active: EEVEE TAA samples = {scene.eevee.taa_render_samples}")
+        scene.cycles.samples = int(args.samples)
+        log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
 
     # Narrow baked frames cleanly for Adaptive Multi-Keyframe Storyboard, single-scene, stepped playblast, or smoke tests!
     bake_frames: Optional[List[int]] = None
@@ -696,7 +765,7 @@ def main() -> int:
             if args.scene is not None
             else manifest["scenes"]
         )
-        bf_set = set()
+        bf_set = {1}  # Always include Frame 1 for Pre-Flight Guard!
         for s in chosen_scenes:
             sf = _compute_scene_frames(
                 int(s["start_frame"]),
@@ -706,13 +775,11 @@ def main() -> int:
             )
             for fr in sf:
                 bf_set.add(fr)
-                # Bake neighbor frames +/- 1 when motion blur is active so shutter interpolation is smooth!
                 if scene.render.use_motion_blur:
                     if fr > int(s["start_frame"]):
                         bf_set.add(fr - 1)
                     if fr < int(s["end_frame"]):
                         bf_set.add(fr + 1)
-        # Also include storyboard hero frames for QC raycast accuracy
         if hasattr(ep_builder, "pick_storyboard_frame"):
             for s in manifest["scenes"]:
                 bf_set.add(ep_builder.pick_storyboard_frame(s, fps))
@@ -730,10 +797,6 @@ def main() -> int:
         bake_frames=bake_frames,
     )
     tmap = build_info["tmap"]
-
-    # Optimize all loaded materials (Mas Dimas + Poly Haven GLTFs) for fast Principled BSDF EEVEE (strip heavy SSS/refraction!)
-    if scene.render.engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
-        lgt_lib.optimize_materials_for_eevee(log_fn=log)
 
     run_qc_checks(scene, human, build_info, ep_builder, fps)
 
@@ -764,20 +827,25 @@ def main() -> int:
     if args.mode != "storyboard" and not apply_post:
         log("POST", "Per-frame CPU post.py SKIPPED for video speed — FFmpeg post-look will run in compose_final.py (~5s).")
 
-    # Mandatory explicit engine banner right before frame 1 renders!
-    gpu_names_str = ", ".join(engine_info.get("gpu_names") or []) or "None (Headless EGL / Software GL)"
-    active_eng_str = (
-        f"CYCLES ({engine_info.get('backend') or scene.cycles.device})"
-        if scene.render.engine == "CYCLES"
-        else scene.render.engine
-    )
-    log("ENGINE", f"Active: {active_eng_str} | GPU Devices: {gpu_names_str}")
+    gpu_names_str = ", ".join(engine_info.get("gpu_names") or []) or "CPU ONLY (--allow-cpu)"
+    active_eng_str = f"CYCLES ({engine_info.get('backend') or scene.cycles.device})"
+    log("ENGINE", f"Active: {active_eng_str} | GPU Devices: {gpu_names_str} | Denoiser: OPENIMAGEDENOISE (FAST)")
 
     if args.mode == "storyboard" and adaptive_kfs is not None:
         render_adaptive_storyboard_keyframes(scene, adaptive_kfs, scenes_out_dir, apply_post=apply_post)
         build_studio_storyboard_sheet(spec_path, timing_path, scenes_out_dir, work_dir / "storyboard_sheet_1.png")
         log("RENDER", f"Completed Adaptive Multi-Keyframe Fast Storyboard ({len(adaptive_kfs)} panels).")
         return 0
+
+    # Pre-Flight Guard Frame 1 (Fail-Fast against black frames or missing CUDA GPU!)
+    if args.mode != "storyboard" and not args.skip_preflight:
+        run_preflight_guard_frame1(
+            scene,
+            tmap,
+            scenes_out_dir,
+            total_frames=total_frames,
+            strict_cuda=strict_no_cpu,
+        )
 
     target_ids = [args.scene] if args.scene is not None else sorted(tmap.keys())
     for sid in target_ids:
