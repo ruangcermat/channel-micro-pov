@@ -230,11 +230,19 @@ def _render_single_sheet(
     vo_speed = float(manifest.get("vo_speed", 1.0))
 
     sheet_tag = f"SHEET {sheet_idx}/{total_sheets}" if total_sheets > 1 else "STORYBOARD SHEET"
+    banner_title = f"{channel.upper()} — {ep_id} ADAPTIVE MULTI-KEYFRAME {sheet_tag}: {ep_title}"
+    banner_font = f_header
+    for sz in (25, 22, 20, 18, 16):
+        cand = _load_font(sz, bold=True)
+        bb_h = draw.textbbox((0, 0), banner_title, font=cand)
+        banner_font = cand
+        if (bb_h[2] - bb_h[0]) <= (canvas_w - margin_x * 2):
+            break
     draw.text(
-        (margin_x, 16),
-        f"{channel.upper()} — {ep_id} ADAPTIVE MULTI-KEYFRAME {sheet_tag}: {ep_title}",
+        (margin_x, 18),
+        banner_title,
         fill=(248, 250, 252),
-        font=f_header,
+        font=banner_font,
     )
     draw.text(
         (margin_x, 54),

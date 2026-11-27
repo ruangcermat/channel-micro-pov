@@ -189,18 +189,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         if badge:
             is_final_scene = sc_idx == total_scenes - 1
-            if is_final_scene:
-                # Anti-Spoiler Badge: hold punchline top badge until final punchline beat (~00:45.5s, NEVER at 00:41.0!)
-                b_start = min(s_end - 0.50, max(s_start + 4.54, vo_start + vo_dur - 2.35))
-                b_end = min(s_end - 0.25, b_start + 1.65)
-            else:
+            if not is_final_scene:
                 b_start = s_start
                 b_end = min(s_end - 0.10, s_start + 1.65)
-            if b_end > b_start + 0.25:
-                pop = r"{\fad(80,140)\t(0,90,\fscx106\fscy106)\t(90,170,\fscx100\fscy100)}"
-                events.append(
-                    f"Dialogue: 0,{_fmt_ass_time(b_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
-                )
+                if b_end > b_start + 0.25:
+                    pop = r"{\fad(80,140)\t(0,90,\fscx106\fscy106)\t(90,170,\fscx100\fscy100)}"
+                    events.append(
+                        f"Dialogue: 0,{_fmt_ass_time(b_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
+                    )
 
         if not vo_text:
             continue

@@ -232,15 +232,15 @@
       "render_pipeline": "blender_3d",
       "camera_archetype": "aerial_erratic",
       "motion_modifiers": ["erratic_wobble", "rapid_wing_flutter"],
-      "camera_motion": "Menukik cepat (aerial_erratic) ke wajah panik Mas Dimas di upper-third safe-zone -> cut to black",
-      "visual_action": "Sayap cokelat-amber semi-transparan bergetar di tepi frame (identik dengan Scene 7). Wajah panik Mas Dimas (tanpa kacamata, semi-matte) berada di upper-third (100% aman dari subtitle MarginV=380 'Maaf ya, bang.') dalam bayangan gelap kontras + rim light tajam, kaus JADI APA terlihat, dan sandal jepit hijau terlepas jatuh mid-air sebelum LAYAR HITAM mendadak. Badge MAAF YA BANG ditunda ke 00:45.5 agar tidak spoiler.",
+      "camera_motion": "Menukik agresif (aerial_erratic) ke close-up (00:46.2) hingga extreme close-up miring/oleng memenuhi layar (00:47.6) tepat sebelum cut to black",
+      "visual_action": "Sayap cokelat-amber semi-transparan bergetar di tepi frame. Wajah panik Mas Dimas (tanpa kacamata, semi-matte) jatuh dalam bayangan low-key gelap dramatis dengan rim light tajam di rambut/telinga/bahu namun putih mata melotot & mulut menganga tetap kontras tajam, sandal jepit hijau terlepas jatuh mid-air, lalu menukik extreme close-up sebelum LAYAR HITAM mendadak. Tanpa badge atas ganda.",
       "assets_used": ["mas_dimas_ready", "sandal_jepit_swallow"],
       "sfx_cues": [
         {"sfx_id": "wings_buzz_loud", "offset_sec": 0.0},
         {"sfx_id": "human_scream_cut", "offset_sec": 4.7}
       ],
-      "lighting": "Bayangan gelap dramatis di wajah Mas Dimas + rim light tajam -> Cut to Black",
-      "on_screen_text": "MAAF YA BANG"
+      "lighting": "Bayangan low-key gelap dramatis di depan wajah Mas Dimas + rim light tajam di rambut/bahu -> Cut to Black",
+      "on_screen_text": ""
     }
   ]
 }

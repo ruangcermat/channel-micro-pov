@@ -595,18 +595,25 @@ def get_storyboard_keyframes(
             (234, 179, 8), None, None,
         ),
         (
-            "08A", 8, 2.30, "MENUKIK KE WAJAH (TANPA SPOILER)",
-            "Kamera menukik ke wajah kaget Mas Dimas dalam bayangan gelap + rim light tajam; badge atas masih kosong (anti-spoiler).",
+            "08A", 8, max(0.2, 43.20 - s8_start), "MENUKIK KE BAYANGAN GELAP WAJAH",
+            "Menukik ke wajah Mas Dimas dalam bayangan low-key gelap dramatis + rim light tajam di rambut/bahu (tanpa badge atas).",
             "Dan kebetulan, bayangan paling gelap di dapur ini ada tepat di mukanya.",
             "SFX: wings_buzz_loud | Room: -32dB | BGM: none_cut_silence",
             (168, 85, 247), None, None,
         ),
         (
-            "08B", 8, max(0.5, 46.20 - s8_start), "ENDING 00:46.2 + SIMULASI SUBTITLE",
-            "Puncak panik Mas Dimas (sandal lepas mid-air, upper-third) + simulasi kotak subtitle \"MAAF YA, BANG.\" (MarginV=380, 100% aman dari wajah!).",
+            "08B", 8, max(0.5, 46.20 - s8_start), "CLOSE-UP PANIK + SUBTITLE ENDING",
+            "Close-up kepala–bahu di upper-center (sandal lepas mid-air) + simulasi subtitle \"MAAF YA, BANG.\" (MarginV=380, tanpa badge ganda).",
             "Maaf ya, bang.",
-            "SFX: human_scream_cut (4.7s) -> Cut to Black | BGM: none",
-            (192, 132, 252), "MAAF YA, BANG.", "MAAF YA BANG",
+            "SFX: wings_buzz_loud | BGM: none_cut_silence",
+            (192, 132, 252), "MAAF YA, BANG.", None,
+        ),
+        (
+            "08C", 8, max(0.5, 47.60 - s8_start), "EXTREME CLOSE-UP PRA-CUT TO BLACK",
+            "Extreme close-up wajah panik memenuhi layar (roll miring/oleng) tepat 1 kedipan sebelum teriakan & Cut to Black mendadak!",
+            "[Teriakan -> LAYAR HITAM]",
+            "SFX: human_scream_cut (47.9s) -> Cut to Black (48.3s)",
+            (239, 68, 68), None, None,
         ),
     ]
 
@@ -1342,24 +1349,27 @@ def build_episode_scene(
             ant_pitch, ant_spread, ant_jit = 12.0, 22.0, 11.5
 
         # =====================================================================
-        # SCENE 8 (00:40.96–00:48.38): MAAF YA BANG — Upper-Third Safe-Zone Bare Face + Dark Shadow + Falling Sandal!
+        # SCENE 8 (00:40.96–00:48.38): MAAF YA BANG — Dramatic Backlit Low-Key Facial Shadow + Extreme Close-Up Dive!
         # =====================================================================
         elif sid == 8:
-            e_neon = 42.0
-            neon_y = 3.18
-            e_neon_emit = 0.35
-            e_rim = 145.0
-            rim_loc = (0.0, 2.78, 2.02)
-            rim_rot = (-38.0, 0.0, 0.0)
+            # True low-key backlit shadow on Mas Dimas's front face ("bayangan paling gelap di dapur ini ada tepat di mukanya"):
+            # - High top-back halo rim (z=2.34, -20 deg, 58W) outlines hair, ears & shoulders sharply WITHOUT SSS orange bleed!
+            # - Front of face falls into rich deep cool shadow while whisper cool-white glint keeps wide eyes & screaming mouth crisp!
+            e_neon = 4.5
+            neon_y = 3.35
+            e_neon_emit = 0.18
+            e_rim = 58.0
+            rim_loc = (0.0, 2.68, 2.34)
+            rim_rot = (-20.0, 0.0, 0.0)
             e_fg = 0.0
-            e_face_fill = 0.16
+            e_face_fill = 0.24  # Delicate cool-blue glint strictly for white sclera & screaming mouth readability inside dark shadow!
             e_night = 0.0
             e_bedroom = 0.0
-            w_strength = 0.012
+            w_strength = 0.002
 
             dur8 = float(s_meta["scene_duration_sec"])
             t_black = float(s_meta.get("cut_to_black_sec", dur8 - 0.12))
-            t_drop = t_black * 0.56
+            t_drop = t_black * 0.62  # Drops right before 08B (46.2s) so tumbling green sandal is visible mid-air in 08B!
 
             show_wings = True
             show_speed = False
@@ -1369,10 +1379,10 @@ def build_episode_scene(
             h_yaw = 0.0
             h_hip_drop = 0.02
             recoil_u = _smooth(max(0.0, (local_sec - t_drop) / max(0.25, t_black - t_drop)))
-            torso_lean = _lerp(8.0, 3.0, recoil_u)
-            head_pitch = _lerp(6.0, 4.0, recoil_u)
-            expr1, expr2, expr_k = "shock", "panic", recoil_u
-            jaw_ex = 0.28 * recoil_u
+            torso_lean = _lerp(8.0, 2.0, recoil_u)
+            head_pitch = _lerp(6.0, 2.0, recoil_u)
+            expr1, expr2, expr_k = "shock", "panic", min(1.0, recoil_u * 1.25)
+            jaw_ex = 0.34 * recoil_u
 
             if local_sec < t_drop:
                 right_sandal_mode = "hand"
@@ -1386,20 +1396,37 @@ def build_episode_scene(
                 r_hand_curls = mh.OPEN_CURLS
                 l_hand_curls = mh.OPEN_CURLS
                 r_pole_mode = "panic"
-                right_hand_target = Vector((-0.24, 2.16, _lerp(1.42, 1.56, recoil_u)))
-                left_hand_target = Vector((0.28, 2.20, _lerp(1.30, 1.52, recoil_u)))
+                right_hand_target = Vector((-0.22, 2.16, _lerp(1.42, 1.56, recoil_u)))
+                left_hand_target = Vector((0.26, 2.20, _lerp(1.30, 1.52, recoil_u)))
 
+            # Accelerating dive curve:
+            # - 08A (u~0.31, 43.2s): medium close-up diving into backlit shadow (cy~1.48, fov~88)
+            # - 08B (u~0.72, 46.2s): tighter head-shoulders upper-center close-up (cy~1.76, fov~76, safe above MarginV=380!)
+            # - 08C (u~0.91, 47.6s): AGGRESSIVE EXTREME CLOSE-UP filling frame w/ erratic roll (cy~2.12, fov~70) -> CUT TO BLACK!
             dive_u = min(1.0, local_sec / max(0.1, t_black))
-            ease = dive_u ** 1.30
-            cx = _lerp(0.04, 0.0, ease)
-            cy = _lerp(1.24, 1.66, ease)
-            cz = _lerp(1.42, 1.36, ease)
+            if dive_u <= 0.72:
+                p1 = _smooth(dive_u / 0.72)
+                cx = _lerp(0.035, 0.008, p1)
+                cy = _lerp(1.30, 1.76, p1)
+                cz = _lerp(1.40, 1.45, p1)
+                pitch = _lerp(94.5, 95.0, p1)
+                roll = _lerp(3.2, 1.8, p1)
+                yaw = 0.0
+                cam_fov = _lerp(92.0, 76.0, p1)
+            else:
+                p2 = _smooth((dive_u - 0.72) / 0.28)
+                cx = _lerp(0.008, -0.012, p2)
+                cy = _lerp(1.76, 2.17, p2 ** 0.85)
+                cz = _lerp(1.45, 1.535, p2)
+                pitch = _lerp(95.0, 91.5, p2)
+                roll = _lerp(1.8, -8.5, p2)
+                yaw = _lerp(0.0, 1.8, p2)
+                cam_fov = _lerp(76.0, 68.0, p2)
             cam_loc = (cx, cy, cz)
-            cam_rot = (_lerp(94.0, 96.0, ease), 2.5 * (1.0 - 0.5 * dive_u), 0.0)
-            cam_fov = _lerp(94.0, 82.0, ease)
+            cam_rot = (pitch, roll, yaw)
             dof_fstop = 2.8
-            cam_motion_intensity = 0.65
-            ant_pitch, ant_spread, ant_jit = -28.0, 34.0, 14.0
+            cam_motion_intensity = 0.72
+            ant_pitch, ant_spread, ant_jit = -28.0, 36.0, 15.0
             wing_flap = 28.0 * math.sin(t_global * 48.0)
 
         # ---- APPLY CAMERA ARCHETYPE + BEAT MODIFIERS + FLOOR CLAMP ----
@@ -1487,15 +1514,15 @@ def build_episode_scene(
                 drop_anchor_pos = sandal_right["root"].location.copy()
                 drop_anchor_quat = sandal_right["root"].rotation_quaternion.copy()
         else:
-            dt_drop = max(0.0, local_sec - (float(s_meta.get("cut_to_black_sec", 4.5)) * 0.56))
+            dt_drop = max(0.0, local_sec - (float(s_meta.get("cut_to_black_sec", 4.5)) * 0.62))
             if drop_anchor_pos is None:
-                drop_anchor_pos = Vector((-0.20, 2.12, 1.38))
+                drop_anchor_pos = Vector((-0.20, 2.14, 1.40))
                 drop_anchor_quat = Euler((math.radians(108.0), math.radians(18.0), math.radians(-24.0))).to_quaternion()
-            inward_u = min(1.0, dt_drop / 0.85)
+            inward_u = min(1.0, dt_drop / 0.70)
             fall_pos = Vector((
                 _lerp(drop_anchor_pos.x, -0.15, inward_u),
-                drop_anchor_pos.y - 0.06 * dt_drop,
-                max(0.02, drop_anchor_pos.z - 0.16 * dt_drop - 0.5 * 0.24 * (dt_drop ** 2)),
+                drop_anchor_pos.y - 0.04 * dt_drop,
+                max(0.02, drop_anchor_pos.z - 0.14 * dt_drop - 0.5 * 0.22 * (dt_drop ** 2)),
             ))
             spin_q = Euler((dt_drop * 1.1 + 0.5, dt_drop * 0.8, dt_drop * 0.6 - 0.35)).to_quaternion()
             sandal_right["root"].rotation_mode = "QUATERNION"
@@ -1516,9 +1543,13 @@ def build_episode_scene(
 
         _set_antennae_independent(ant_rig, fr, t_global, ant_pitch, ant_spread, jitter=ant_jit, wind_bend_deg=ant_wind)
         if show_wings:
-            wx = 0.019 if sid == 8 else 0.028
-            wy = -0.028 if sid == 8 else -0.034
-            wz = -0.050 if sid == 8 else -0.048
+            if sid == 8:
+                s8_u = min(1.0, local_sec / max(0.1, float(s_meta.get("cut_to_black_sec", 7.3))))
+                wx = _lerp(0.019, 0.026, _smooth(max(0.0, (s8_u - 0.60) / 0.40)))
+                wy = _lerp(-0.028, -0.032, _smooth(max(0.0, (s8_u - 0.60) / 0.40)))
+                wz = -0.050
+            else:
+                wx, wy, wz = 0.028, -0.034, -0.048
             _kf_loc_rot(ant_rig["wing_l_pivot"], fr, loc=(-wx, wy, wz), rot_deg=(-8.0, wing_flap, 12.0))
             _kf_loc_rot(ant_rig["wing_r_pivot"], fr, loc=(wx, wy, wz), rot_deg=(-8.0, -wing_flap, -12.0))
 
