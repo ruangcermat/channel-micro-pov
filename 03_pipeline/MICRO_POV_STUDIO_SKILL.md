@@ -12,9 +12,10 @@ DILARANG menaruh logika spesifik satu episode (mis. dapur kecoak, lambung, jalan
 ├── core/                         # LAPISAN 1 — UNIVERSAL STUDIO CORE (EP001–EP100+)
 │   ├── camera_presets.py         # 5 Arketipe Kamera POV + Beat Modifiers + Floor Clamp + Motion Blur
 │   ├── mpfb_helpers.py           # Master Mas Dimas v3.0 (semi-matte 0.55–0.65), Leg IK, reach(), grips
+│   ├── fast_anim.py              # Direct Action/FCurve foreach_set + zero-depsgraph FK (bake 1.153+f < 3s!)
 │   ├── paint_mas_dimas_tex.py    # UV texture painter (Crimson #A62C2B + "JADI APA" + garis kuning)
-│   ├── lighting_utils.py         # AgX + Adaptive Fast Storyboard (270x480 4s) + Cycles multi-GPU
-│   ├── post.py                   # Camera finishing pass (soft lens, glow, vignette, film grain)
+│   ├── lighting_utils.py         # AgX + EEVEE (default) / CYCLES_GPU strict (0 silent CPU fallback!)
+│   ├── post.py                   # Camera finishing pass (storyboard stills; video uses FFmpeg Post-Look)
 │   └── audio_utils.py            # faster-whisper (1/VO_SPEED + anti-hallucination), 15ms fade, room_tone
 ├── scripts/                      # LAPISAN 2 — GENERIC RUNNERS & UTILITIES
 │   ├── build_and_render.py       # Generic runner: load `04_episodes/<ep>/scene_builder.py`
@@ -73,8 +74,11 @@ DILARANG menaruh logika spesifik satu episode (mis. dapur kecoak, lambung, jalan
    - **Jumlah panel & sheet adaptif (tidak dibatasi kaku):** Render sebanyak keyframe yang dibutuhkan, dibagi rapi maksimal **8–9 panel per sheet** (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, dst.) agar **seluruh transisi penting** (masuk ruangan, tekan saklar, tangan meraih properti dari rak/meja, *bullet-time*, langkah kaki, *whip-pan* kiri/kanan/atas, terbang, hingga **simulasi kotak subtitle ending**) bisa diaudit sebelum render final.
    - Agen **WAJIB Self-QC Vision** terhadap seluruh panel sebelum menampilkan ke user, lalu **STOP TOTAL** menunggu balasan **`ACC STORYBOARD`**.
 2. **FAST LOCAL FINAL RENDER (`--mode final` — Hanya Setelah `ACC STORYBOARD`):**
+   - **Direct FCurve Baking `< 3 Detik`:** Gunakan `FastKeyframeRecorder` (`foreach_set("co", ...)`) + `FastArmatureFK` agar baking 1.153+ frame selesai < 3 detik (bukan 610 detik!).
    - **Wajib Disk Lokal Cepat (`--frames-dir /tmp/render_frames/<ep>`):** DILARANG menulis 1.161+ PNG mentah ke Google Drive! Setelah `compose_final.py` menyalin **HANYA 1 file `final_epXXX.mp4`** (~15–25 MB) ke Google Drive, `--cleanup-frames` otomatis menghapus seluruh PNG di `/tmp/render_frames/`.
-   - **Engine Utama (`CYCLES_FAST`, default Colab):** `1080×1920`, `24 fps`, `OPTIX` (fallback `CUDA`), **`10 samples`**, `adaptive_threshold=0.05`, `OPTIX` denoiser (runtime fallback `OIDN`), `max_bounces=4` (`diffuse=2, glossy=2, transmission=2, volume=0`), `use_persistent_data=True`, `use_motion_blur=True` (`shutter=0.40`) → **~1–1,5 detik/frame (~18–25 menit di Colab T4)**. Tersedia juga toggle **`EEVEE`** (`16 samples`, < 5 menit).
+   - **Engine Eksplisit (0 Silent CPU Fallback):**
+     - **`EEVEE` *(Default Tercepat, < 5 menit di Colab T4)*:** `BLENDER_EEVEE_NEXT` (4.2–4.5) / `BLENDER_EEVEE` (5.0+ & <=4.1), `taa_render_samples=16`, raytracing/SSS berat OFF, tidak pernah jatuh diam-diam ke Cycles CPU.
+     - **`CYCLES_GPU` *(Raytraced ~15–20 menit di Colab T4)*:** `get_devices()` + `OPTIX` (fallback `CUDA`), GPU ON & CPU OFF, `10 samples`, `adaptive=0.05`, `max_bounces=4` (`volume=0`), `persistent_data=True`. Jika 0 GPU terdeteksi -> abort keras (`--python-exit-code 1`)!
    - **FFmpeg Post-Look (Skip CPU `post.py` di Mode Video):** Efek *color grade + vignette + grain* dijalankan langsung di filter **FFmpeg** (`compose_final.py`, selesai ~5 detik sebelum burn-in subtitle `.ass`) sehingga tidak memakan waktu 1.161× Python CPU.
 
 ---
@@ -86,4 +90,4 @@ DILARANG menaruh logika spesifik satu episode (mis. dapur kecoak, lambung, jalan
   - [ ] Jangan pernah zero `$md-*` body shape keys (hanya `!ex-*` + `BOOST=1.6` + tulang `jaw`).
   - [ ] `shoulder01.L/R` WAJIB masuk `POSE_BONES` agar selalu di-reset & di-keyframe setiap frame.
   - [ ] Pertahankan `Hide helpers` MASK di `Kid_body`; hapus hanya `Delete.*` agar kaki nyeker utuh.
-  - [ ] Selalu `Displace 0.006`, `fix_teeth.py`, `pack_all()`, `MISSING=[]`, `shoes=0`, `camera_clear=ALL`, serta **Fast Local Disk `/tmp/render_frames/`** + `OPTIX` denoiser dengan auto-fallback `OPENIMAGEDENOISE`.
+  - [ ] Selalu `Displace 0.006`, `fix_teeth.py`, `pack_all()`, `MISSING=[]`, `shoes=0`, `camera_clear=ALL`, **Direct FCurve Baking `< 3s`**, **Fast Local Disk `/tmp/render_frames/`**, dan cetak `[ENGINE] Active: ... | GPU Devices: ...`.

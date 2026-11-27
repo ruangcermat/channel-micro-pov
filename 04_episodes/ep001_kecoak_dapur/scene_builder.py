@@ -41,6 +41,7 @@ for _p in (str(PIPELINE_DIR), str(SCRIPTS_DIR)):
 from core import camera_presets as cam_lib
 from core import lighting_utils as lgt_lib
 from core import mpfb_helpers as mh
+from core.fast_anim import FastArmatureFK, FastKeyframeRecorder
 from pipeline_utils import log
 import procedural_props as props
 
@@ -374,56 +375,43 @@ def _smooth(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
-def _kf_loc_rot(obj: bpy.types.Object, frame: int, loc=None, rot_deg=None, scale=None) -> None:
+def _kf_loc_rot(
+    rec: FastKeyframeRecorder,
+    obj: bpy.types.Object,
+    frame: int,
+    loc=None,
+    rot_deg=None,
+    scale=None,
+) -> None:
     if loc is not None:
-        obj.location = loc
-        obj.keyframe_insert(data_path="location", frame=frame)
+        rec.record_vec(obj, "location", frame, loc)
     if rot_deg is not None:
-        obj.rotation_mode = "XYZ"
-        obj.rotation_euler = Euler(tuple(math.radians(a) for a in rot_deg), "XYZ")
-        obj.keyframe_insert(data_path="rotation_euler", frame=frame)
+        rec.record_vec(obj, "rotation_euler", frame, (math.radians(rot_deg[0]), math.radians(rot_deg[1]), math.radians(rot_deg[2])))
     if scale is not None:
-        obj.scale = scale
-        obj.keyframe_insert(data_path="scale", frame=frame)
+        rec.record_vec(obj, "scale", frame, scale)
 
 
-def _kf_fov(cam_data: bpy.types.Camera, frame: int, fov_deg: float) -> None:
-    cam_data.lens_unit = "MILLIMETERS"
-    sensor_mm = cam_data.sensor_height if cam_data.sensor_fit == "VERTICAL" else cam_data.sensor_width
+def _kf_fov(rec: FastKeyframeRecorder, cam_data: bpy.types.Camera, frame: int, fov_deg: float, sensor_mm: float) -> None:
     fov_rad = math.radians(max(12.0, min(150.0, fov_deg)))
-    cam_data.lens = (sensor_mm * 0.5) / math.tan(fov_rad * 0.5)
-    cam_data.keyframe_insert(data_path="lens", frame=frame)
+    lens = (sensor_mm * 0.5) / math.tan(fov_rad * 0.5)
+    rec.record_scalar(cam_data, "lens", frame, lens)
 
 
-def _kf_dof(cam_data: bpy.types.Camera, frame: int, dist_m: float, fstop: float = 3.2) -> None:
-    cam_data.dof.use_dof = True
-    cam_data.dof.focus_distance = max(0.05, dist_m)
-    cam_data.dof.aperture_fstop = fstop
-    cam_data.dof.keyframe_insert(data_path="focus_distance", frame=frame)
-    cam_data.dof.keyframe_insert(data_path="aperture_fstop", frame=frame)
+def _kf_dof(rec: FastKeyframeRecorder, cam_data: bpy.types.Camera, frame: int, dist_m: float, fstop: float = 3.2) -> None:
+    rec.record_scalar(cam_data, "dof.focus_distance", frame, max(0.05, dist_m))
+    rec.record_scalar(cam_data, "dof.aperture_fstop", frame, fstop)
 
 
-def _kf_hide(obj: bpy.types.Object, frame: int, hidden: bool) -> None:
-    for t in [obj] + list(obj.children_recursive):
-        t.hide_render = hidden
-        t.hide_viewport = hidden
-        t.keyframe_insert(data_path="hide_render", frame=frame)
-        t.keyframe_insert(data_path="hide_viewport", frame=frame)
+def _kf_hide(rec: FastKeyframeRecorder, obj: bpy.types.Object, frame: int, hidden: bool) -> None:
+    rec.record_hide(obj, frame, hidden)
 
 
-def _kf_light(light_data: bpy.types.Light, frame: int, energy: float) -> None:
-    light_data.energy = energy
-    light_data.keyframe_insert(data_path="energy", frame=frame)
-
-
-def _set_neon_emission(neon_mat: bpy.types.Material, frame: int, strength: float) -> None:
-    for node in neon_mat.node_tree.nodes:
-        if node.type == "BSDF_PRINCIPLED" and "Emission Strength" in node.inputs:
-            node.inputs["Emission Strength"].default_value = strength
-            node.inputs["Emission Strength"].keyframe_insert(data_path="default_value", frame=frame)
+def _kf_light(rec: FastKeyframeRecorder, light_data: bpy.types.Light, frame: int, energy: float) -> None:
+    rec.record_scalar(light_data, "energy", frame, energy)
 
 
 def _set_antennae_independent(
+    rec: FastKeyframeRecorder,
     ant_rig: Dict[str, bpy.types.Object],
     frame: int,
     t_sec: float,
@@ -437,8 +425,8 @@ def _set_antennae_independent(
     jl_s = jitter * (0.70 * math.cos(t_sec * 14.5 + 1.1) + 0.30 * math.sin(t_sec * 27.0))
     jr_p = jitter * (0.65 * math.cos(t_sec * 21.0 + 2.2) + 0.35 * math.sin(t_sec * 35.0))
     jr_s = jitter * (0.70 * math.sin(t_sec * 16.0 + 0.7) + 0.30 * math.cos(t_sec * 29.0))
-    _kf_loc_rot(ant_rig["ant_l"], frame, rot_deg=(pitch_deg + wind_bend_deg + jl_p, 0.0, spread_deg + jl_s))
-    _kf_loc_rot(ant_rig["ant_r"], frame, rot_deg=(pitch_deg + wind_bend_deg * 0.85 + jr_p, 0.0, -spread_deg - jr_s))
+    _kf_loc_rot(rec, ant_rig["ant_l"], frame, rot_deg=(pitch_deg + wind_bend_deg + jl_p, 0.0, spread_deg + jl_s))
+    _kf_loc_rot(rec, ant_rig["ant_r"], frame, rot_deg=(pitch_deg + wind_bend_deg * 0.85 + jr_p, 0.0, -spread_deg - jr_s))
 
 
 # =============================================================================
@@ -766,22 +754,54 @@ def build_episode_scene(
         return last_sid, s, 1.0, float(s["scene_duration_sec"])
 
     frames_to_bake = sorted(set(bake_frames)) if bake_frames is not None else list(range(1, total_frames + 1))
-    log("EP001", f"Baking {len(frames_to_bake)} frames (Mas Dimas v3.0 100% nyeker + static shoe rack + shut door + 5-archetype POV)...")
+    log("EP001", f"Baking {len(frames_to_bake)} frames via direct Action/FCurve foreach_set + zero-depsgraph FK...")
     t_bake = _time.monotonic()
+
+    # Pre-configure rotation modes & static settings ONCE before the loop (zero per-frame depsgraph churn!)
+    arm = human["arm"]
+    arm.rotation_mode = "XYZ"
+    sandal_right["root"].rotation_mode = "QUATERNION"
+    for _eu_obj in (
+        door_pivot,
+        cam_obj,
+        wind["root"],
+        dust["root"],
+        ant_rig["ant_l"],
+        ant_rig["ant_r"],
+        ant_rig["wing_l_pivot"],
+        ant_rig["wing_r_pivot"],
+        lights["neon_obj"],
+        lights["rim_obj"],
+    ):
+        _eu_obj.rotation_mode = "XYZ"
+    cam_data.lens_unit = "MILLIMETERS"
+    cam_data.dof.use_dof = True
+    cam_sensor_mm = cam_data.sensor_height if cam_data.sensor_fit == "VERTICAL" else cam_data.sensor_width
+
+    neon_nt = env["neon_mat"].node_tree
+    neon_emit_paths = [
+        f'nodes["{n.name}"].inputs["Emission Strength"].default_value'
+        for n in neon_nt.nodes
+        if n.type == "BSDF_PRINCIPLED" and "Emission Strength" in n.inputs
+    ]
+    world_nt = scene.world.node_tree
+    world_strength_path = f'nodes["{lights["world_bg"].name}"].inputs["Strength"].default_value'
+
+    rec = FastKeyframeRecorder()
+    fk = FastArmatureFK(arm, mh.POSE_BONES)
 
     drop_anchor_pos: Optional[Vector] = None
     drop_anchor_quat: Optional[Quaternion] = None
+    prev_sandal_quat: Optional[Quaternion] = None
     sandal_grip_distances: Dict[int, float] = {}
     rack_right_pos = Vector(shoe_rack["slot_right"])
     rack_right_quat = Euler((0.0, 0.0, math.radians(184.0)), "XYZ").to_quaternion()
 
     for idx_f, fr in enumerate(frames_to_bake):
-        scene.frame_set(fr)
         t_global = (fr - 1) / float(fps)
         sid, s_meta, u, local_sec = _scene_for_frame(fr)
         sc_spec = smap.get(sid, {})
-        arm = human["arm"]
-        mh.reset_pose(human)
+        fk.reset_pose()
 
         # Camera archetype & modifiers from spec!
         archetype = sc_spec.get("camera_archetype", pov_cfg.get("camera_archetype", "insect_ground"))
@@ -1092,6 +1112,7 @@ def build_episode_scene(
             ant_pitch, ant_spread, ant_jit, ant_wind = 10.0, 16.0, 8.5, -14.0 * su
 
             _kf_loc_rot(
+                rec,
                 wind["root"],
                 fr,
                 loc=(_lerp(-0.08, -0.02, u), _lerp(0.76, 0.42, u), _lerp(0.56, 0.20, u)),
@@ -1135,6 +1156,7 @@ def build_episode_scene(
                 show_dust = True
                 show_speed = True
                 _kf_loc_rot(
+                    rec,
                     dust["root"],
                     fr,
                     loc=(0.18, 0.72, 0.012 + 0.006 * du),
@@ -1449,11 +1471,13 @@ def build_episode_scene(
         )
 
         # ---- APPLY BEDROOM DOOR ROTATION (CLOSES SHUT AT 00:02.0!) ----
-        _kf_loc_rot(door_pivot, fr, rot_deg=(0.0, 0.0, door_rot_deg))
+        _kf_loc_rot(rec, door_pivot, fr, rot_deg=(0.0, 0.0, door_rot_deg))
 
-        # ---- APPLY MAS DIMAS POSE (100% NYEKER ACROSS ALL SCENES — left_sole_lift=0, right_sole_lift=0!) ----
-        mh.place_and_feet(
+        # ---- APPLY MAS DIMAS POSE (100% NYEKER ACROSS ALL SCENES — ZERO DEPSGRAPH CALLS!) ----
+        mh.place_and_feet_fast(
             human,
+            fk,
+            rec,
             h_loc,
             h_yaw,
             fr,
@@ -1464,18 +1488,22 @@ def build_episode_scene(
             left_sole_lift=0.0,
             right_sole_lift=0.0,
         )
-        mh.lean(arm, torso_lean)
-        mh.torso_twist(arm, torso_tw)
-        mh.head_turn(arm, head_yaw, head_pitch)
-        mh.D.pose_arms(arm, yaw_deg=h_yaw + torso_tw, elbow=16.0)
-        mh.D.relaxed_hands(arm)
+        mh.apply_upper_body_fast(
+            fk,
+            torso_lean_deg=torso_lean,
+            torso_tw_deg=torso_tw,
+            head_yaw_deg=head_yaw,
+            head_pitch_deg=head_pitch,
+            arm_yaw_deg=h_yaw + torso_tw,
+            elbow_deg=16.0,
+        )
         r_wrist_pitch = -18.0 if right_sandal_mode == "hand" else -4.0
         r_wrist_twist = -38.0 if right_sandal_mode == "hand" else 28.0
-        mh.set_hand_curl(arm, "R", r_hand_curls, wrist_pitch=r_wrist_pitch, twist=r_wrist_twist)
+        mh.set_hand_curl_fast(fk, "R", r_hand_curls, wrist_pitch=r_wrist_pitch, twist=r_wrist_twist)
         if l_hand_curls is not None:
-            mh.set_hand_curl(arm, "L", l_hand_curls, wrist_pitch=-6.0, twist=20.0)
+            mh.set_hand_curl_fast(fk, "L", l_hand_curls, wrist_pitch=-6.0, twist=20.0)
 
-        fwd_v, left_v = mh.body_frame(arm)
+        fwd_v, left_v = fk.body_frame()
         if right_hand_target is not None:
             if r_pole_mode == "backswing":
                 r_pole = -fwd_v * 0.55 - left_v * 0.95 + Vector((0.0, 0.0, 0.25))
@@ -1485,34 +1513,39 @@ def build_episode_scene(
                 r_pole = -fwd_v * 0.25 - left_v * 0.90 + Vector((0.0, 0.0, 0.35))
             else:
                 r_pole = -fwd_v * 0.35 - left_v * 0.85 + Vector((0.0, 0.0, -0.55))
-            mh.reach(arm, "R", right_hand_target, r_pole)
+            fk.reach("R", right_hand_target, r_pole)
         if left_hand_target is not None:
             l_pole = -fwd_v * 0.35 + left_v * 0.85 + Vector((0.0, 0.0, -0.55))
-            mh.reach(arm, "L", left_hand_target, l_pole)
+            fk.reach("L", left_hand_target, l_pole)
 
-        mh.key_pose(human, fr)
-        mh.set_face(human, t_global, fps, expr1, expr2, expr_k, jaw_extra=jaw_ex, frame=fr)
+        mh.set_face_fast(human, fk, rec, t_global, fps, expr1, expr2, expr_k, jaw_extra=jaw_ex, frame=fr)
+        fk.record_pose(rec, fr)
 
         # ---- SANDAL CONTINUITY LOCK (STATIC SHOE RACK -> RIGHT HAND -> DROP!) ----
         if right_sandal_mode == "rack":
-            sandal_right["root"].rotation_mode = "QUATERNION"
-            sandal_right["root"].location = rack_right_pos.copy()
-            sandal_right["root"].rotation_quaternion = rack_right_quat.copy()
-            sandal_right["root"].keyframe_insert("location", frame=fr)
-            sandal_right["root"].keyframe_insert("rotation_quaternion", frame=fr)
+            q_s = rack_right_quat.copy()
+            if prev_sandal_quat is not None and prev_sandal_quat.dot(q_s) < 0.0:
+                q_s = -q_s
+            prev_sandal_quat = q_s
+            rec.record_vec(sandal_right["root"], "location", fr, (rack_right_pos.x, rack_right_pos.y, rack_right_pos.z))
+            rec.record_vec(sandal_right["root"], "rotation_quaternion", fr, (q_s.w, q_s.x, q_s.y, q_s.z))
         elif right_sandal_mode == "hand":
-            pos_s = mh.snap_sandal_to_right_hand(
+            pos_s, center_s, q_s = mh.snap_sandal_to_right_hand_fast(
                 human,
+                fk,
+                rec,
                 sandal_right["root"],
                 fr,
                 aim_sole_dir=sandal_aim_sole,
                 blade_dir_hint=sandal_blade_hint,
+                prev_quat=prev_sandal_quat,
             )
-            w_now = mh.wp(arm, arm.pose.bones["wrist.R"].head)
+            prev_sandal_quat = q_s
+            w_now = fk.head_world("wrist.R")
             sandal_grip_distances[sid] = max(sandal_grip_distances.get(sid, 0.0), (pos_s - w_now).length)
             if sid == 8:
-                drop_anchor_pos = sandal_right["root"].location.copy()
-                drop_anchor_quat = sandal_right["root"].rotation_quaternion.copy()
+                drop_anchor_pos = center_s.copy()
+                drop_anchor_quat = q_s.copy()
         else:
             dt_drop = max(0.0, local_sec - (float(s_meta.get("cut_to_black_sec", 4.5)) * 0.62))
             if drop_anchor_pos is None:
@@ -1525,23 +1558,24 @@ def build_episode_scene(
                 max(0.02, drop_anchor_pos.z - 0.14 * dt_drop - 0.5 * 0.22 * (dt_drop ** 2)),
             ))
             spin_q = Euler((dt_drop * 1.1 + 0.5, dt_drop * 0.8, dt_drop * 0.6 - 0.35)).to_quaternion()
-            sandal_right["root"].rotation_mode = "QUATERNION"
-            sandal_right["root"].location = fall_pos
-            sandal_right["root"].rotation_quaternion = spin_q @ drop_anchor_quat
-            sandal_right["root"].keyframe_insert("location", frame=fr)
-            sandal_right["root"].keyframe_insert("rotation_quaternion", frame=fr)
+            q_s = spin_q @ drop_anchor_quat
+            if prev_sandal_quat is not None and prev_sandal_quat.dot(q_s) < 0.0:
+                q_s = -q_s
+            prev_sandal_quat = q_s
+            rec.record_vec(sandal_right["root"], "location", fr, (fall_pos.x, fall_pos.y, fall_pos.z))
+            rec.record_vec(sandal_right["root"], "rotation_quaternion", fr, (q_s.w, q_s.x, q_s.y, q_s.z))
 
         # In Scene 8, dynamically focus Macro DOF squarely onto Mas Dimas's terrified eyes!
         if sid == 8:
-            face_pt = mh.eye_mid(human)
+            face_pt = mh.eye_mid_fast(fk)
             dof_dist = max(0.15, (face_pt - Vector(cam_loc_final)).length)
 
         # ---- CAMERA, MACRO DOF, INDEPENDENT ANTENNAE, FLUTTERING AMBER WINGS, VFX, LIGHTS ----
-        _kf_loc_rot(cam_obj, fr, loc=cam_loc_final, rot_deg=cam_rot_final)
-        _kf_fov(cam_data, fr, cam_fov_final)
-        _kf_dof(cam_data, fr, dof_dist, fstop=dof_fstop)
+        _kf_loc_rot(rec, cam_obj, fr, loc=cam_loc_final, rot_deg=cam_rot_final)
+        _kf_fov(rec, cam_data, fr, cam_fov_final, cam_sensor_mm)
+        _kf_dof(rec, cam_data, fr, dof_dist, fstop=dof_fstop)
 
-        _set_antennae_independent(ant_rig, fr, t_global, ant_pitch, ant_spread, jitter=ant_jit, wind_bend_deg=ant_wind)
+        _set_antennae_independent(rec, ant_rig, fr, t_global, ant_pitch, ant_spread, jitter=ant_jit, wind_bend_deg=ant_wind)
         if show_wings:
             if sid == 8:
                 s8_u = min(1.0, local_sec / max(0.1, float(s_meta.get("cut_to_black_sec", 7.3))))
@@ -1550,43 +1584,50 @@ def build_episode_scene(
                 wz = -0.050
             else:
                 wx, wy, wz = 0.028, -0.034, -0.048
-            _kf_loc_rot(ant_rig["wing_l_pivot"], fr, loc=(-wx, wy, wz), rot_deg=(-8.0, wing_flap, 12.0))
-            _kf_loc_rot(ant_rig["wing_r_pivot"], fr, loc=(wx, wy, wz), rot_deg=(-8.0, -wing_flap, -12.0))
+            _kf_loc_rot(rec, ant_rig["wing_l_pivot"], fr, loc=(-wx, wy, wz), rot_deg=(-8.0, wing_flap, 12.0))
+            _kf_loc_rot(rec, ant_rig["wing_r_pivot"], fr, loc=(wx, wy, wz), rot_deg=(-8.0, -wing_flap, -12.0))
 
-        _kf_hide(wind["root"], fr, not show_wind)
-        _kf_hide(dust["root"], fr, not show_dust)
-        _kf_hide(speed_rig["root"], fr, not show_speed)
-        _kf_hide(ant_rig["wing_l"], fr, not show_wings)
-        _kf_hide(ant_rig["wing_r"], fr, not show_wings)
-        _kf_hide(ant_rig["leg_l"], fr, not show_front_legs)
-        _kf_hide(ant_rig["leg_r"], fr, not show_front_legs)
-        _kf_hide(shadow_roach["root"], fr, not show_shadow_roach)
-        _kf_hide(black_shutter, fr, not show_black)
+        _kf_hide(rec, wind["root"], fr, not show_wind)
+        _kf_hide(rec, dust["root"], fr, not show_dust)
+        _kf_hide(rec, speed_rig["root"], fr, not show_speed)
+        _kf_hide(rec, ant_rig["wing_l"], fr, not show_wings)
+        _kf_hide(rec, ant_rig["wing_r"], fr, not show_wings)
+        _kf_hide(rec, ant_rig["leg_l"], fr, not show_front_legs)
+        _kf_hide(rec, ant_rig["leg_r"], fr, not show_front_legs)
+        _kf_hide(rec, shadow_roach["root"], fr, not show_shadow_roach)
+        _kf_hide(rec, black_shutter, fr, not show_black)
 
-        _kf_loc_rot(lights["neon_obj"], fr, loc=(0.0, neon_y, 2.56))
-        _kf_loc_rot(lights["rim_obj"], fr, loc=rim_loc, rot_deg=rim_rot)
-        _kf_light(lights["night_light"], fr, e_night)
-        _kf_light(lights["bedroom_light"], fr, e_bedroom)
-        _kf_light(lights["neon_light"], fr, e_neon)
-        _kf_light(lights["rim_light"], fr, e_rim)
-        _kf_light(lights["fg_light"], fr, e_fg)
-        _kf_light(lights["face_fill_light"], fr, e_face_fill)
-        _kf_light(lights["cyan_light"], fr, e_cyan)
-        _kf_light(lights["roach_spot_light"], fr, e_roach_spot)
-        lights["roach_spot_light"].color = roach_spot_col
-        lights["roach_spot_light"].keyframe_insert(data_path="color", frame=fr)
-        _kf_light(lights["puddle_spec_light"], fr, e_puddle_spec)
-        _set_neon_emission(env["neon_mat"], fr, e_neon_emit)
-        lights["world_bg"].inputs["Strength"].default_value = w_strength
-        lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=fr)
+        _kf_loc_rot(rec, lights["neon_obj"], fr, loc=(0.0, neon_y, 2.56))
+        _kf_loc_rot(rec, lights["rim_obj"], fr, loc=rim_loc, rot_deg=rim_rot)
+        _kf_light(rec, lights["night_light"], fr, e_night)
+        _kf_light(rec, lights["bedroom_light"], fr, e_bedroom)
+        _kf_light(rec, lights["neon_light"], fr, e_neon)
+        _kf_light(rec, lights["rim_light"], fr, e_rim)
+        _kf_light(rec, lights["fg_light"], fr, e_fg)
+        _kf_light(rec, lights["face_fill_light"], fr, e_face_fill)
+        _kf_light(rec, lights["cyan_light"], fr, e_cyan)
+        _kf_light(rec, lights["roach_spot_light"], fr, e_roach_spot)
+        rec.record_vec(lights["roach_spot_light"], "color", fr, roach_spot_col)
+        _kf_light(rec, lights["puddle_spec_light"], fr, e_puddle_spec)
+        for np_path in neon_emit_paths:
+            rec.record_scalar(neon_nt, np_path, fr, e_neon_emit)
+        rec.record_scalar(world_nt, world_strength_path, fr, w_strength)
 
-        if (idx_f + 1) % 50 == 0 or (idx_f + 1) == len(frames_to_bake):
-            log("EP001", f"Baked {idx_f + 1}/{len(frames_to_bake)} frames ({_time.monotonic() - t_bake:.1f}s)")
+    # Flush ALL buffered FCurves in ONE batch foreach_set("co", ...) pass!
+    t_flush = _time.monotonic()
+    fk.sync_rotation_modes_to_armature()
+    num_curves, num_keys = rec.flush(default_interpolation="LINEAR")
+    t_bake_done = _time.monotonic() - t_bake
+    log(
+        "EP001",
+        f"Finished baking {len(frames_to_bake)} frames in {t_bake_done:.2f}s "
+        f"(FCurve batch flush: {_time.monotonic() - t_flush:.2f}s | {num_curves} curves, {num_keys:,} keys)",
+    )
 
     populate_dense_kosan_kitchen(assets_dir)
     scene.frame_start = 1
     scene.frame_end = total_frames
-    log("EP001", f"Finished baking {len(frames_to_bake)} frames in {_time.monotonic() - t_bake:.1f}s")
+    scene.frame_set(1)
 
     return {
         "tmap": tmap,

@@ -36,11 +36,17 @@ File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setia
    - **Anti-Spoiler Badge:** Jangan tampilkan badge teks punchline ending sejak awal scene terakhir; tunda hingga detik punchline (mis. `00:45.5`) atau kosongkan badge atas scene terakhir.
    - Pastikan SFX kontinyu bernada ramai (seperti `skitter_fast`) diturunkan sekitar **`-7 dB` di bawah VO** agar narasi cepat tetap 100% jernih.
 
-7. **Fast Local Render — Cycles OptiX 10 Samples + FFmpeg Post + Auto-Delete `/tmp/` PNG (DILARANG Menulis PNG ke Drive):**
-   - Render Cycles 24 samples + per-frame CPU `post.py` sambil menulis 1.161+ PNG langsung ke FUSE Google Drive memakan ~10 detik/frame (~3 jam/video) dan mengotori Google Drive.
+7. **Fast Local Render — Disk Lokal `/tmp/render_frames/` + FFmpeg Post + Auto-Delete PNG (DILARANG Menulis PNG ke Drive):**
+   - Render sambil menulis 1.161+ PNG langsung ke FUSE Google Drive & menjalankan CPU `post.py` per frame memakan berjam-jam dan mengotori Google Drive.
    - **WAJIB Disk Lokal Cepat:** Semua PNG mentah & video scene sementara WAJIB dirender ke **`--frames-dir /tmp/render_frames/<ep>`** (SSD lokal). Setelah `compose_final.py` menyalin **HANYA 1 file `final_epXXX.mp4`** (~15–25 MB) ke Google Drive `04_episodes/epXXX_.../`, flag `--cleanup-frames` **otomatis menghapus** seluruh isi `/tmp/render_frames/`.
-   - **Preset Utama (`CYCLES_FAST`, default Colab):** `CYCLES` device `OPTIX` (fallback `CUDA`), **`samples = 10`**, `use_adaptive_sampling = True` (`adaptive_threshold = 0.05`), `use_denoising = True` (`OPTIX` denoiser dengan auto-fallback runtime ke `OPENIMAGEDENOISE`), `max_bounces = 4` (`diffuse=2, glossy=2, transmission=2, volume=0`), `use_persistent_data = True` → **~1–1,5 detik/frame (~18–25 menit di Colab T4)**. Tersedia pula toggle **`RENDER_ENGINE = "EEVEE"`** di Form Sel 1 Colab untuk render < 5 menit.
    - **FFmpeg Post-Look (~5 Detik vs 1.161× Python CPU):** Pada mode video (`final`/`preview`), `post.py` CPU per-frame dilewati otomatis; efek ringan *color grade (`eq`), vignette, dan film grain (`noise`)* diterapkan langsung di filter **FFmpeg** tepat sebelum burn-in subtitle `.ass`.
+
+8. **Ultra-Fast Direct FCurve Baking (`< 3 Detik`) & Strict Engine Enforcement (`EEVEE` Default / `CYCLES_GPU` Anti-CPU-Fallback):**
+   - **Penyebab Baking 610 Detik:** Memanggil `keyframe_insert()` dan `bpy.context.view_layer.update()` berulang di dalam loop 1.153+ frame memicu puluhan ribu evaluasi depsgraph Blender.
+   - **Standar Wajib (`03_pipeline/core/fast_anim.py`):** Semua baking animasi episode WAJIB menggunakan `FastKeyframeRecorder` (menulis `Action` & `FCurve` langsung via `fcurve.keyframe_points.add(N)` + `fcurve.keyframe_points.foreach_set("co", flat_coords)` + `fcurve.update()` sekali di akhir, kompatibel Blender 5.x Slotted Actions) + `FastArmatureFK` (kinematika murni `mathutils` tanpa `view_layer.update()` per frame) → baking 1.153+ frame turun dari **610,9 detik menjadi < 3 detik**.
+   - **Strict Engine Enforcement (DILARANG Silent Fallback ke CPU!):**
+     - **`EEVEE` *(Default Tercepat di Colab, < 5 menit)*:** Deteksi otomatis `BLENDER_EEVEE_NEXT` (4.2–4.5) atau `BLENDER_EEVEE` (5.0+ / <=4.1), `taa_render_samples = 16`, matikan raytracing/refraction berat di headless EGL, dan bersihkan Subsurface Scattering (SSS) berat pada `Principled BSDF`. Tidak boleh jatuh diam-diam ke Cycles CPU.
+     - **`CYCLES_GPU` *(Kualitas Raytraced di T4 GPU)*:** Wajib panggil `cycles.preferences.get_devices()`, aktifkan `OPTIX` (fallback `CUDA`), centang semua GPU `use = True` & CPU `use = False`, `samples = 10`, `adaptive_threshold = 0.05`, `max_bounces = 4` (`volume_bounces = 0`), `use_persistent_data = True`. Jika **0 GPU terdeteksi**, skrip WAJIB langsung berhenti dengan error jelas (`--python-exit-code 1`) dan mencetak `[ENGINE] Active: ... | GPU Devices: ...`.
 
 ---
 

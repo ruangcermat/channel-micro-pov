@@ -1,25 +1,141 @@
 #!/usr/bin/env python3
 """Universal Lighting, AgX Color Management & Render Engine Presets (`Jadi Apa` Studio Core).
 
-Supports Fast Local Cloud Production modes:
-- `storyboard`   (Gate 1): 270×480, 4 Cycles samples + OIDN, motion blur OFF -> `storyboard_sheet_*.png`
-- `motion_check` (Legacy): 360×640, 8 samples, EEVEE with Cycles low-sample fallback
-- `preview`              : 540×960, 10 samples, 24fps GPU motion preview
-- `final`                : 1080×1920, 24fps Fast Local Render:
-                           * `CYCLES_FAST` (Default): OptiX (fallback CUDA/CPU), 10 samples,
-                             adaptive_threshold=0.05, OptiX denoiser (runtime fallback OIDN),
-                             max_bounces=4 (diffuse=2, glossy=2, transmission=2, volume=0),
-                             use_persistent_data=True (~1–1.5s/frame on Colab T4!)
-                           * `EEVEE`: 16 TAA samples (< 5 min full episode on Colab T4)
+Supports Fast Local Cloud Production modes with STRICT engine enforcement (ZERO silent CPU fallback!):
+- `EEVEE` (Default fastest):
+    * Detects `BLENDER_EEVEE_NEXT` (Blender 4.2–4.5) or `BLENDER_EEVEE` (Blender 5.0+ / <=4.1)
+    * `taa_render_samples = 16`, heavy raytracing/screen-space refraction OFF, Principled BSDF SSS stripped
+    * NEVER silently falls back to Cycles CPU!
+- `CYCLES_GPU` (Strict NVIDIA GPU):
+    * Calls `cycles.preferences.get_devices()`, activates `OPTIX` (fallback `CUDA`), enables ALL GPUs & disables CPU
+    * `samples = 10`, `adaptive_threshold = 0.05`, `max_bounces = 4` (`diffuse=2, glossy=2, transmission=2, volume=0`),
+      `use_persistent_data = True`
+    * If 0 GPU devices detected -> RAISES RuntimeError immediately (NEVER silently falls back to CPU!)
 """
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import bpy
+
+
+def optimize_materials_for_eevee(log_fn=None) -> int:
+    """Strip heavy Subsurface Scattering (SSS), deduplicate GLTF `.001` materials, & trim fill-light shadows for fast EEVEE."""
+    import re as _re
+
+    # 1. Deduplicate identical Poly Haven GLTF `.001/.002` material clones (cuts shader compiles by ~60%!)
+    deduped = 0
+    for obj in bpy.data.objects:
+        if obj.type != "MESH" or not getattr(obj.data, "materials", None):
+            continue
+        for idx, mat in enumerate(obj.data.materials):
+            if mat is None:
+                continue
+            m_dot = _re.match(r"^(.+)\.\d{3}$", mat.name)
+            if not m_dot:
+                continue
+            base_mat = bpy.data.materials.get(m_dot.group(1))
+            if base_mat is not None and base_mat is not mat and not mat.name.startswith("Human."):
+                obj.data.materials[idx] = base_mat
+                deduped += 1
+
+    # 2. Strip heavy Subsurface Scattering (SSS) & screen-space refraction for fast Principled BSDF
+    touched = 0
+    seen_trees = set()
+
+    def _walk_tree(nt: bpy.types.NodeTree) -> None:
+        nonlocal touched
+        if nt is None or nt.as_pointer() in seen_trees:
+            return
+        seen_trees.add(nt.as_pointer())
+        for n in nt.nodes:
+            if n.type == "BSDF_PRINCIPLED":
+                changed = False
+                for inp_name in ("Subsurface Weight", "Subsurface", "Subsurface Scale", "Transmission Weight", "Transmission"):
+                    inp = n.inputs.get(inp_name)
+                    if inp is not None:
+                        if inp.is_linked:
+                            for lk in list(inp.links):
+                                nt.links.remove(lk)
+                            changed = True
+                        if hasattr(inp, "default_value") and float(inp.default_value) != 0.0:
+                            inp.default_value = 0.0
+                            changed = True
+                if changed:
+                    touched += 1
+            elif n.type == "GROUP" and getattr(n, "node_tree", None) is not None:
+                _walk_tree(n.node_tree)
+
+    for mat in bpy.data.materials:
+        if mat is None:
+            continue
+        if hasattr(mat, "use_screen_refraction"):
+            try:
+                mat.use_screen_refraction = False
+            except Exception:
+                pass
+        if mat.use_nodes and mat.node_tree:
+            _walk_tree(mat.node_tree)
+
+    # 3. Disable virtual shadow maps on soft fill/bounce lights (keep shadows ON for key/backlight/spot lights!)
+    fill_culled = 0
+    for lgt in bpy.data.lights:
+        lname = lgt.name.lower()
+        is_fill = any(tok in lname for tok in ("fill", "fg_", "foreground", "puddle", "cyan", "night", "bedroom"))
+        if is_fill and getattr(lgt, "use_shadow", False):
+            lgt.use_shadow = False
+            fill_culled += 1
+
+    if log_fn:
+        log_fn(
+            "ENGINE",
+            f"EEVEE fast Principled BSDF optimization applied (stripped SSS/refraction on {touched} nodes, "
+            f"deduped {deduped} GLTF material slots, culled shadows on {fill_culled} fill lights)",
+        )
+    return touched
+
+
+def detect_cycles_gpus() -> Tuple[bool, Optional[str], List[str]]:
+    """Explicitly query Cycles GPU devices via `get_devices()`, preferring OPTIX then CUDA (disabling CPU)."""
+    has_gpu = False
+    gpu_backend: Optional[str] = None
+    gpu_names: List[str] = []
+    try:
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        for compute_type in ("OPTIX", "CUDA"):
+            try:
+                prefs.compute_device_type = compute_type
+                if hasattr(prefs, "get_devices"):
+                    prefs.get_devices()
+                prefs.refresh_devices()
+                gpu_devices = [d for d in prefs.devices if d.type == compute_type]
+                if gpu_devices:
+                    for d in prefs.devices:
+                        d.use = d.type == compute_type
+                    has_gpu = True
+                    gpu_backend = compute_type
+                    gpu_names = [d.name for d in gpu_devices]
+                    break
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return has_gpu, gpu_backend, gpu_names
+
+
+def _resolve_eevee_engine_id() -> str:
+    """Return `BLENDER_EEVEE_NEXT` (Blender 4.2–4.5) or `BLENDER_EEVEE` (Blender 5.0+ and <=4.1)."""
+    ids = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
+    if bpy.app.version >= (4, 2, 0) and "BLENDER_EEVEE_NEXT" in ids:
+        return "BLENDER_EEVEE_NEXT"
+    if "BLENDER_EEVEE" in ids:
+        return "BLENDER_EEVEE"
+    if "BLENDER_EEVEE_NEXT" in ids:
+        return "BLENDER_EEVEE_NEXT"
+    raise RuntimeError(f"EEVEE render engine tidak ditemukan di Blender {bpy.app.version} (available: {ids})")
 
 
 def configure_render_engine(
@@ -29,13 +145,12 @@ def configure_render_engine(
     fps: int = 24,
     log_fn=None,
 ) -> Dict[str, Any]:
-    """Configure Cycles Fast OptiX (10 samples, adaptive 0.05, volume_bounces=0) or EEVEE + AgX."""
+    """Configure EEVEE (fast headless) or strict CYCLES_GPU (OPTIX/CUDA) + AgX. NEVER silently drops to CPU!"""
     scene.render.fps = fps
     scene.render.fps_base = 1.0
     engine_upper = engine_choice.upper()
 
     if mode == "storyboard":
-        # Fast Draft QC (< 60s total for all panels): 1/4 of 1080x1920 + 4 samples + OIDN, motion blur OFF
         res_x, res_y = 270, 480
         cyc_samples, eevee_samples = 4, 8
         max_bounces = 2
@@ -48,7 +163,6 @@ def configure_render_engine(
         cyc_samples, eevee_samples = 10, 12
         max_bounces = 4
     else:
-        # Production Final: 1080x1920 Fast Local Render (~1-1.5s/frame on T4 with Cycles Fast OptiX!)
         res_x, res_y = 1080, 1920
         cyc_samples, eevee_samples = 10, 16
         max_bounces = 4
@@ -60,7 +174,6 @@ def configure_render_engine(
     scene.render.image_settings.color_mode = "RGB"
     scene.render.image_settings.compression = 15
 
-    # Motion blur ON for all moving video renders (shutter=0.40 for smooth shake & whip-pan!)
     scene.render.use_motion_blur = mode != "storyboard"
     scene.render.motion_blur_shutter = 0.40
 
@@ -76,69 +189,69 @@ def configure_render_engine(
             pass
     scene.view_settings.exposure = -0.45
 
-    # Detect NVIDIA GPU backend (OPTIX preferred, automatic fallback CUDA -> CPU)
-    has_gpu = False
-    device_used = "CPU"
-    gpu_backend: Optional[str] = None
-    try:
-        prefs = bpy.context.preferences.addons["cycles"].preferences
-        for compute_type in ("OPTIX", "CUDA"):
-            try:
-                prefs.compute_device_type = compute_type
-                prefs.refresh_devices()
-                gpu_devices = [d for d in prefs.devices if d.type == compute_type]
-                if gpu_devices:
-                    for d in prefs.devices:
-                        d.use = d.type == compute_type
-                    has_gpu = True
-                    gpu_backend = compute_type
-                    names = ", ".join(d.name for d in gpu_devices)
-                    device_used = f"GPU x{len(gpu_devices)} ({compute_type}: {names})"
-                    break
-            except Exception:
-                continue
-    except Exception:
-        pass
+    has_gpu, gpu_backend, gpu_names = detect_cycles_gpus()
+    gpu_label = ", ".join(gpu_names) if gpu_names else "None (Headless EGL / Software GL)"
 
-    # Optional ultra-fast EEVEE (< 5 min on T4 GPU) or legacy motion_check AUTO
-    want_eevee = engine_upper == "EEVEE" or (mode == "motion_check" and engine_upper == "AUTO")
-    if want_eevee:
-        ids = [e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items]
-        eevee_id = next((e for e in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE") if e in ids), None)
-        if eevee_id and has_gpu:
-            scene.render.engine = eevee_id
-            ee = scene.eevee
-            for k, v in (
-                ("taa_render_samples", eevee_samples),
-                ("use_shadows", True),
-                ("use_raytracing", True),
-                ("ray_tracing_method", "SCREEN"),
-                ("use_volumetric_shadows", False),
-                ("volumetric_tile_size", "4"),
-                ("shadow_ray_count", 2),
-                ("shadow_step_count", 6),
-            ):
-                try:
-                    setattr(ee, k, v)
-                except Exception:
-                    pass
-            if log_fn:
-                log_fn(
-                    "BLENDER",
-                    f"EEVEE configured ({eevee_id}) | Mode: {mode} ({res_x}x{res_y}, {eevee_samples} samples, "
-                    f"{fps}fps, MB={scene.render.use_motion_blur}) | {device_used}",
-                )
-            return {"engine": eevee_id, "has_gpu": has_gpu, "backend": gpu_backend}
-        elif log_fn:
+    # -------------------------------------------------------------------------
+    # OPTION 1: EEVEE (Fastest! NEVER falls back silently to Cycles CPU!)
+    # -------------------------------------------------------------------------
+    if engine_upper == "EEVEE":
+        eevee_id = _resolve_eevee_engine_id()
+        scene.render.engine = eevee_id
+        scene.render.use_motion_blur = False  # Avoid expensive multi-step velocity passes in headless EEVEE!
+        ee = scene.eevee
+        for k, v in (
+            ("taa_render_samples", eevee_samples),
+            ("use_shadows", True),
+            ("use_raytracing", False),          # OFF: heavy screen-space raytracing crawls on headless EGL!
+            ("use_volumetric_shadows", False),
+            ("use_ssr", False),                 # Blender 4.1- compat
+            ("use_ssr_refraction", False),      # Blender 4.1- compat
+            ("use_gtao", False),
+            ("shadow_ray_count", 1),
+            ("shadow_step_count", 4),
+            ("shadow_resolution_scale", 0.5),
+            ("shadow_pool_size", "128"),
+            ("volumetric_tile_size", "8"),
+        ):
+            try:
+                setattr(ee, k, v)
+            except Exception:
+                pass
+        banner = f"Active: {eevee_id} | GPU Devices: {gpu_label}"
+        if log_fn:
+            log_fn("ENGINE", banner)
             log_fn(
                 "BLENDER",
-                f"EEVEE headless without GPU/EGL — auto-fallback to Cycles Fast ({cyc_samples} samples).",
+                f"EEVEE Fast configured ({eevee_id}) | Mode: {mode} ({res_x}x{res_y}, {eevee_samples} TAA samples, "
+                f"raytracing=OFF, shadows=ON, {fps}fps, MB=False) | AgX: ON",
             )
+        else:
+            print(f"[ENGINE] {banner}", flush=True)
+        return {
+            "engine": eevee_id,
+            "has_gpu": has_gpu,
+            "backend": gpu_backend,
+            "gpu_names": gpu_names,
+            "strict_no_cpu": True,
+        }
 
-    # Motion blur ON for all GPU video renders and all preview/final renders (shutter=0.40);
-    # skipped only on CPU-only motion_check fallback to avoid 2-3x slower per-frame BVH rebuilds.
-    scene.render.use_motion_blur = (mode != "storyboard") and (has_gpu or mode != "motion_check")
-    scene.render.motion_blur_shutter = 0.40
+    # -------------------------------------------------------------------------
+    # OPTION 2: CYCLES_GPU / CYCLES_FAST (Strict GPU — HARD FAIL if 0 GPUs!)
+    # -------------------------------------------------------------------------
+    strict_gpu = engine_upper in ("CYCLES_GPU", "CYCLES_FAST")
+    if strict_gpu and not has_gpu:
+        msg = (
+            f"[ENGINE] Active: NONE (ABORTED) | GPU Devices: 0 NVIDIA GPUs detected!\n"
+            f"ERROR: --engine {engine_upper} dipilih tetapi tidak ada GPU NVIDIA (OPTIX/CUDA) yang terdeteksi.\n"
+            f"Di Google Colab, buka menu: Runtime -> Ubah jenis runtime -> pilih 'GPU T4', lalu jalankan ulang.\n"
+            f"Skrip dihentikan paksa agar TIDAK jatuh diam-diam ke Cycles CPU (14 menit/frame)!"
+        )
+        if log_fn:
+            log_fn("ERROR", msg)
+        else:
+            print(msg, flush=True)
+        raise RuntimeError(msg)
 
     scene.render.engine = "CYCLES"
     scene.render.use_persistent_data = True
@@ -157,7 +270,6 @@ def configure_render_engine(
     scene.cycles.transparent_max_bounces = 4
     scene.cycles.use_denoising = True
 
-    # Cycles Fast OptiX: use OPTIX denoiser when OPTIX GPU is active (auto-falls back to OIDN on frame error!)
     use_optix_denoiser = has_gpu and gpu_backend == "OPTIX" and mode != "storyboard"
     denoiser_name = "OPTIX" if use_optix_denoiser else "OPENIMAGEDENOISE"
     try:
@@ -175,15 +287,26 @@ def configure_render_engine(
         except Exception:
             pass
 
+    active_tag = f"CYCLES ({gpu_backend})" if has_gpu else "CYCLES (CPU)"
+    banner = f"Active: {active_tag} | GPU Devices: {', '.join(gpu_names) if gpu_names else 'CPU ONLY (legacy mode)'}"
     if log_fn:
+        log_fn("ENGINE", banner)
         log_fn(
             "BLENDER",
-            f"Cycles Fast configured ({engine_upper}) | Mode: {mode} ({res_x}x{res_y}, {cyc_samples} samples, "
+            f"Cycles configured ({engine_upper}) | Mode: {mode} ({res_x}x{res_y}, {cyc_samples} samples, "
             f"adapt={scene.cycles.adaptive_threshold}, bounces={eff_bounces}/vol=0, {fps}fps, "
-            f"MB={scene.render.use_motion_blur}, persistent=True) | Device: {device_used} | "
-            f"Denoiser: {denoiser_name} | AgX: ON",
+            f"MB={scene.render.use_motion_blur}, persistent=True) | Denoiser: {denoiser_name} | AgX: ON",
         )
-    return {"engine": "CYCLES", "has_gpu": has_gpu, "backend": gpu_backend, "denoiser": denoiser_name}
+    else:
+        print(f"[ENGINE] {banner}", flush=True)
+    return {
+        "engine": "CYCLES",
+        "has_gpu": has_gpu,
+        "backend": gpu_backend,
+        "gpu_names": gpu_names,
+        "denoiser": denoiser_name,
+        "strict_no_cpu": strict_gpu,
+    }
 
 
 def add_area_light(

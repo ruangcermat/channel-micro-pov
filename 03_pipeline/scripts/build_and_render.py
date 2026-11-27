@@ -169,20 +169,26 @@ def run_qc_checks(
 
 
 # =============================================================================
-# RESILIENT FRAME RENDERER (OPTIX -> OIDN -> CUDA -> CPU FALLBACK + AUTO-RESUME)
+# RESILIENT FRAME RENDERER (OPTIX -> OIDN GPU -> CUDA GPU; ZERO SILENT CPU FALLBACK!)
 # =============================================================================
 
-def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: Path, apply_post: bool) -> float:
+def _render_single_frame_resilient(
+    scene: bpy.types.Scene,
+    frame: int,
+    out_png: Path,
+    apply_post: bool,
+    strict_no_cpu: bool = True,
+) -> float:
     t0 = _time.monotonic()
     scene.frame_set(frame)
     scene.render.filepath = str(out_png)
     try:
         bpy.ops.render.render(write_still=True)
     except Exception as exc:
-        log("WARN", f"Frame {frame} render failed ({exc}); trying fallback backend...")
         if scene.render.engine == "CYCLES":
-            # Stage 1: If OPTIX denoiser failed on a specific T4 driver, keep fast OPTIX GPU raytracing & switch denoiser -> OIDN!
+            log("WARN", f"Frame {frame} Cycles render failed ({exc}); trying GPU recovery...")
             recovered = False
+            # Stage 1: If OPTIX denoiser failed on a specific T4 driver, keep OPTIX GPU raytracing & switch denoiser -> OIDN!
             if getattr(scene.cycles, "denoiser", "") == "OPTIX":
                 try:
                     scene.cycles.denoiser = "OPENIMAGEDENOISE"
@@ -191,7 +197,7 @@ def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: 
                     except Exception:
                         pass
                     bpy.ops.render.render(write_still=True)
-                    log("RENDER", f"Recovered frame {frame} via OPTIX GPU + OPENIMAGEDENOISE fallback")
+                    log("RENDER", f"Recovered frame {frame} via OPTIX GPU + OPENIMAGEDENOISE")
                     recovered = True
                 except Exception:
                     pass
@@ -199,11 +205,17 @@ def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: 
             if not recovered:
                 prefs = bpy.context.preferences.addons["cycles"].preferences
                 scene.cycles.denoiser = "OPENIMAGEDENOISE"
-                for backend in ("CUDA", None):
+                backends = ("CUDA",) if strict_no_cpu else ("CUDA", None)
+                for backend in backends:
                     try:
                         if backend:
                             prefs.compute_device_type = backend
+                            if hasattr(prefs, "get_devices"):
+                                prefs.get_devices()
                             prefs.refresh_devices()
+                            gpu_devs = [d for d in prefs.devices if d.type == backend]
+                            if not gpu_devs:
+                                continue
                             for d in prefs.devices:
                                 d.use = d.type == backend
                             scene.cycles.device = "GPU"
@@ -220,18 +232,16 @@ def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: 
                     except Exception:
                         continue
             if not recovered:
-                raise
+                raise RuntimeError(
+                    f"Cycles GPU render gagal pada frame {frame} ({exc}). "
+                    f"Skrip dihentikan agar TIDAK jatuh diam-diam ke CPU!"
+                ) from exc
         else:
-            # EEVEE failed on headless Linux (missing EGL context) -> fall back to Cycles Fast GPU (OPTIX/CUDA) then CPU!
-            lgt_lib.configure_render_engine(scene, "CYCLES_FAST", "final", fps=scene.render.fps, log_fn=log)
-            scene.cycles.denoiser = "OPENIMAGEDENOISE"
-            try:
-                bpy.ops.render.render(write_still=True)
-                log("RENDER", f"Recovered frame {frame} via Cycles Fast ({scene.cycles.device}) fallback from EEVEE")
-            except Exception:
-                scene.cycles.device = "CPU"
-                bpy.ops.render.render(write_still=True)
-                log("RENDER", f"Recovered frame {frame} via Cycles CPU fallback from EEVEE")
+            # STRICT RULE: EEVEE must NEVER silently fall back to Cycles CPU (14 min/frame)!
+            raise RuntimeError(
+                f"EEVEE ({scene.render.engine}) render gagal pada frame {frame}: {exc}. "
+                f"Skrip dihentikan (TIDAK fallback diam-diam ke Cycles CPU)!"
+            ) from exc
 
     if apply_post and out_png.exists():
         post_lib.apply_camera_look(out_png, out_png, seed=7 + frame)
@@ -261,6 +271,7 @@ def render_scene_clip(
     apply_post: bool = True,
     frame_step: int = 1,
     max_frames: int = 0,
+    strict_no_cpu: bool = True,
 ) -> Path:
     sid = int(scene_meta["scene_id"])
     f_start = int(scene_meta["start_frame"])
@@ -278,7 +289,7 @@ def render_scene_clip(
     log(
         "RENDER",
         f"Scene {sid:02d} | Frames {f_start}..{f_end} ({len(target_frames)}/{total_scene_frames} frames{step_tag}{max_tag}, "
-        f"auto-resume >10KB, post={apply_post})",
+        f"engine={scene.render.engine}, auto-resume >10KB, post={apply_post})",
     )
 
     for idx, fr in enumerate(target_frames):
@@ -286,11 +297,11 @@ def render_scene_clip(
         if frame_file.exists() and frame_file.stat().st_size > 10_240:
             skipped += 1
             continue
-        dt = _render_single_frame_resilient(scene, fr, frame_file, apply_post=apply_post)
+        dt = _render_single_frame_resilient(scene, fr, frame_file, apply_post=apply_post, strict_no_cpu=strict_no_cpu)
         rendered += 1
-        if rendered == 1 or rendered % 12 == 0 or idx == len(target_frames) - 1:
+        if len(target_frames) <= 10 or rendered == 1 or rendered % 12 == 0 or idx == len(target_frames) - 1:
             rem = max(0, len(target_frames) - 1 - idx)
-            log("RENDER", f"FRAME {fr}/{f_end} (Scene {sid:02d}, {idx + 1}/{len(target_frames)}) {dt:.1f}s | est. scene rem ~{rem * dt:.0f}s")
+            log("RENDER", f"FRAME {fr}/{f_end} (Scene {sid:02d}, {idx + 1}/{len(target_frames)}) {dt:.2f}s | est. scene rem ~{rem * dt:.0f}s")
 
     log("RENDER", f"Scene {sid:02d} frames ready (rendered={rendered}, resumed/skipped={skipped})")
 
@@ -570,8 +581,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--engine",
-        choices=["CYCLES_FAST", "CYCLES", "EEVEE", "AUTO"],
-        default="CYCLES_FAST",
+        choices=["EEVEE", "CYCLES_GPU", "CYCLES_FAST", "CYCLES", "AUTO"],
+        default="EEVEE",
     )
     parser.add_argument("--scene", type=int, default=None, help="Render ONLY a single scene_id")
     parser.add_argument("--save-blend", action="store_true", help="Pack & save assembled .blend file")
@@ -594,13 +605,13 @@ def parse_args() -> argparse.Namespace:
         "--max-frames",
         type=int,
         default=0,
-        help="Limit rendered frames per scene (0 = all; e.g. 2 for 2-frame final smoke test)",
+        help="Limit rendered frames per scene (0 = all; e.g. 3 for 3-frame EEVEE smoke test)",
     )
     parser.add_argument(
         "--samples",
         type=int,
         default=0,
-        help="Optional Cycles sample override (0 = use mode preset: 4 storyboard, 8 motion_check, 10 preview/final)",
+        help="Optional sample override (0 = use mode preset: 16 EEVEE final, 10 CYCLES_GPU final)",
     )
     return parser.parse_args(extra)
 
@@ -645,10 +656,15 @@ def main() -> int:
 
     human = mh.load_mpfb2_human_base(mas_dimas_blend, target_height_m=1.68)
     scene = bpy.context.scene
-    lgt_lib.configure_render_engine(scene, args.engine, args.mode, fps, log_fn=log)
-    if args.samples and args.samples > 0 and scene.render.engine == "CYCLES":
-        scene.cycles.samples = int(args.samples)
-        log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
+    engine_info = lgt_lib.configure_render_engine(scene, args.engine, args.mode, fps, log_fn=log)
+    strict_no_cpu = bool(engine_info.get("strict_no_cpu", True))
+    if args.samples and args.samples > 0:
+        if scene.render.engine == "CYCLES":
+            scene.cycles.samples = int(args.samples)
+            log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
+        elif hasattr(scene, "eevee") and hasattr(scene.eevee, "taa_render_samples"):
+            scene.eevee.taa_render_samples = int(args.samples)
+            log("BLENDER", f"Sample override active: EEVEE TAA samples = {scene.eevee.taa_render_samples}")
 
     # Narrow baked frames cleanly for Adaptive Multi-Keyframe Storyboard, single-scene, stepped playblast, or smoke tests!
     bake_frames: Optional[List[int]] = None
@@ -715,6 +731,10 @@ def main() -> int:
     )
     tmap = build_info["tmap"]
 
+    # Optimize all loaded materials (Mas Dimas + Poly Haven GLTFs) for fast Principled BSDF EEVEE (strip heavy SSS/refraction!)
+    if scene.render.engine in ("BLENDER_EEVEE", "BLENDER_EEVEE_NEXT"):
+        lgt_lib.optimize_materials_for_eevee(log_fn=log)
+
     run_qc_checks(scene, human, build_info, ep_builder, fps)
 
     if args.save_blend or args.no_render:
@@ -744,6 +764,15 @@ def main() -> int:
     if args.mode != "storyboard" and not apply_post:
         log("POST", "Per-frame CPU post.py SKIPPED for video speed — FFmpeg post-look will run in compose_final.py (~5s).")
 
+    # Mandatory explicit engine banner right before frame 1 renders!
+    gpu_names_str = ", ".join(engine_info.get("gpu_names") or []) or "None (Headless EGL / Software GL)"
+    active_eng_str = (
+        f"CYCLES ({engine_info.get('backend') or scene.cycles.device})"
+        if scene.render.engine == "CYCLES"
+        else scene.render.engine
+    )
+    log("ENGINE", f"Active: {active_eng_str} | GPU Devices: {gpu_names_str}")
+
     if args.mode == "storyboard" and adaptive_kfs is not None:
         render_adaptive_storyboard_keyframes(scene, adaptive_kfs, scenes_out_dir, apply_post=apply_post)
         build_studio_storyboard_sheet(spec_path, timing_path, scenes_out_dir, work_dir / "storyboard_sheet_1.png")
@@ -767,6 +796,7 @@ def main() -> int:
                 apply_post=apply_post,
                 frame_step=frame_step,
                 max_frames=max_frames,
+                strict_no_cpu=strict_no_cpu,
             )
 
     if args.mode == "storyboard":
@@ -775,7 +805,7 @@ def main() -> int:
         if args.scene is None:
             build_studio_storyboard_sheet(spec_path, timing_path, scenes_out_dir, work_dir / "storyboard_sheet.png")
 
-    log("RENDER", f"Completed rendering {len(target_ids)} scene(s) in mode '{args.mode}' ({args.engine}).")
+    log("RENDER", f"Completed rendering {len(target_ids)} scene(s) in mode '{args.mode}' ({active_eng_str}).")
     return 0
 
 

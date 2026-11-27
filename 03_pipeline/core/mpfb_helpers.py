@@ -1368,3 +1368,220 @@ def snap_sandal_to_foot(
     sandal_root.keyframe_insert("location", frame=frame)
     sandal_root.keyframe_insert("rotation_quaternion", frame=frame)
     return pos
+
+
+# =============================================================================
+# ULTRA-FAST ZERO-DEPSGRAPH BATCH POSING & RECORDING (< 3s FOR 1,153+ FRAMES!)
+# =============================================================================
+
+def place_and_feet_fast(
+    human: Dict[str, Any],
+    fk: Any,
+    rec: Any,
+    loc: Tuple[float, float, float],
+    yaw_deg: float,
+    frame: int,
+    hip_drop: float = 0.0,
+    left_foot_override: Optional[Tuple[float, float, float, float]] = None,
+    right_foot_override: Optional[Tuple[float, float, float, float]] = None,
+    stance_scale: float = 0.72,
+    stagger_y: float = 0.07,
+    left_sole_lift: float = 0.0,
+    right_sole_lift: float = 0.0,
+) -> None:
+    """Zero-depsgraph equivalent of `place_and_feet()` that records directly into `FastKeyframeRecorder`."""
+    arm = human["arm"]
+    R = human["leg_ik"]
+    base_z = loc[2] + R.get("sole_z_shift", 0.0) + max(left_sole_lift, right_sole_lift)
+    arm_loc = (loc[0], loc[1], base_z - hip_drop)
+    yaw_rad = math.radians(yaw_deg)
+
+    fk.set_arm_transform(arm_loc, yaw_deg)
+    rec.record_vec(arm, "location", frame, arm_loc)
+    rec.record_vec(arm, "rotation_euler", frame, (0.0, 0.0, yaw_rad))
+
+    loc_v = Vector((loc[0], loc[1], loc[2]))
+    for s, sx, ov, s_lift in (
+        ("L", 1.0, left_foot_override, left_sole_lift),
+        ("R", -1.0, right_foot_override, right_sole_lift),
+    ):
+        fx, fy, fz, frest = R["feet"][s]
+        if ov is not None:
+            ox, oy, lift_z, pitch_deg = ov
+            tg_loc = (ox, oy, fz + s_lift + lift_z)
+            rot_eu = (Rz(yaw_deg) @ Matrix.Rotation(math.radians(pitch_deg), 3, X) @ frest).to_euler()
+        else:
+            dy = -stagger_y if s == "L" else stagger_y
+            p = loc_v + Rz(yaw_deg) @ Vector((sx * fx * stance_scale, fy + dy, 0.0))
+            tg_loc = (p.x, p.y, fz + s_lift)
+            foot_yaw = yaw_deg + (6.0 if s == "L" else -8.0)
+            rot_eu = (Rz(foot_yaw) @ frest).to_euler()
+        pl_v = loc_v + Rz(yaw_deg) @ Vector((sx * 0.14 * human["scale"], -1.2, R["hip"].z * 0.5))
+
+        rec.record_vec(R["tg"][s], "location", frame, tg_loc)
+        rec.record_vec(R["rt"][s], "rotation_euler", frame, (rot_eu.x, rot_eu.y, rot_eu.z))
+        rec.record_vec(R["pl"][s], "location", frame, (pl_v.x, pl_v.y, pl_v.z))
+
+
+def set_hand_curl_fast(
+    fk: Any,
+    side: str,
+    curls: Dict[str, Tuple[float, float, float]],
+    wrist_pitch: float = -8.0,
+    twist: float = 35.0,
+) -> None:
+    s = 1.0 if side == "L" else -1.0
+    for f_idx, angs in curls.items():
+        for j, a in zip((1, 2, 3), angs):
+            fk.set_euler_xyz(f"finger{f_idx}-{j}.{side}", math.radians(a), 0.0, 0.0)
+    fk.set_euler_xyz(f"wrist.{side}", math.radians(wrist_pitch), 0.0, 0.0)
+    fk.set_euler_xyz(f"lowerarm02.{side}", 0.0, math.radians(s * twist), 0.0)
+
+
+def apply_upper_body_fast(
+    fk: Any,
+    torso_lean_deg: float,
+    torso_tw_deg: float,
+    head_yaw_deg: float,
+    head_pitch_deg: float,
+    arm_yaw_deg: float,
+    elbow_deg: float = 16.0,
+    shoulder_drop: float = 8.0,
+) -> None:
+    """Zero-depsgraph equivalent of `lean` + `torso_twist` + `head_turn` + `D.pose_arms` + `D.relaxed_hands`."""
+    _, left = fk.body_frame()
+    fk.rot_world("spine03", left, torso_lean_deg * 0.6)
+    fk.rot_world("spine05", left, torso_lean_deg * 0.4)
+    if abs(torso_tw_deg) > 1e-4:
+        fk.rot_world("spine03", Z, torso_tw_deg * 0.45)
+        fk.rot_world("spine05", Z, torso_tw_deg * 0.55)
+    if abs(head_yaw_deg) > 1e-4:
+        fk.rot_world("neck01", Z, head_yaw_deg * 0.48)
+        fk.rot_world("head", Z, head_yaw_deg * 0.52)
+    if abs(head_pitch_deg) > 1e-4:
+        fk.rot_world("head", left, head_pitch_deg)
+
+    # Mirror D.pose_arms()
+    sh_axis = Matrix.Rotation(math.radians(arm_yaw_deg), 3, Z) @ Y
+    for side, s in (("L", 1.0), ("R", -1.0)):
+        fk.rot_world(f"shoulder01.{side}", sh_axis, s * shoulder_drop)
+        up, fa = D.arm_dirs(arm_yaw_deg, 0.0, elbow_deg, 0.0, 0.0, s, 0.16, 0.10)
+        fk.aim(f"upperarm01.{side}", up)
+        fk.aim(f"upperarm02.{side}", up)
+        fk.aim(f"lowerarm01.{side}", fa)
+
+    # Mirror D.relaxed_hands()
+    for side in ("L", "R"):
+        set_hand_curl_fast(fk, side, D.CURLS, wrist_pitch=-8.0, twist=35.0)
+
+
+def set_face_fast(
+    human: Dict[str, Any],
+    fk: Any,
+    rec: Any,
+    t_sec: float,
+    fps: int,
+    e1: str,
+    e2: Optional[str] = None,
+    k: float = 0.0,
+    jaw_extra: float = 0.0,
+    frame: int = 1,
+) -> None:
+    """Zero-depsgraph batch equivalent of `set_face()` (NEVER touches `$md-*` body shape keys!)."""
+    a = EXPR[e1]
+    b = EXPR[e2] if e2 else a
+
+    blink = 0.0
+    for tb in human["blink_times"]:
+        df = (t_sec - tb) * fps
+        if 0.0 <= df <= 8.0:
+            blink = [0.0, 0.35, 0.8, 1.0, 1.0, 0.8, 0.5, 0.2, 0.0][int(df)]
+            break
+
+    sk_id = human["body"].data.shape_keys
+    jaw_val = 0.0
+    for kb in human["exkeys"]:
+        unit = kb.name[4:]
+        v = _lerp(a.get(unit, 0.0), b.get(unit, 0.0), k) * BOOST
+        if unit == "jawOpen":
+            jaw_val = min(1.0, v + jaw_extra)
+            v = jaw_val * 0.25
+        if unit.startswith("eyeBlink"):
+            v = max(v, blink)
+        val = min(1.0, max(0.0, v))
+        rec.record_scalar(sk_id, f'key_blocks["{kb.name}"].value', frame, val)
+
+    # Rotate jaw bone around head's local +X axis in world space (exact match to set_face)
+    fk._basis.pop("jaw", None)
+    fk._pose_cache.pop("jaw", None)
+    head_rot3 = fk.world_mat("head").to_3x3().normalized()
+    left_axis = (head_rot3 @ Vector((1.0, 0.0, 0.0))).normalized()
+    fk.rot_world("jaw", left_axis, 17.0 * jaw_val)
+
+
+def eye_mid_fast(fk: Any) -> Vector:
+    return (fk.head_world("eye.L") + fk.head_world("eye.R")) * 0.5
+
+
+def snap_sandal_to_right_hand_fast(
+    human: Dict[str, Any],
+    fk: Any,
+    rec: Any,
+    sandal_root: bpy.types.Object,
+    frame: int,
+    aim_sole_dir: Optional[Vector] = None,
+    blade_dir_hint: Optional[Vector] = None,
+    prev_quat: Optional[Quaternion] = None,
+) -> Tuple[Vector, Vector, Quaternion]:
+    """Zero-depsgraph equivalent of `snap_sandal_to_right_hand()`. Returns `(grip_pt, center_pos, quat)`."""
+    s = human["scale"]
+    w0 = fk.head_world("wrist.R")
+    w1 = fk.tail_world("wrist.R")
+    palm_dir = (w1 - w0).normalized()
+
+    f2 = fk.head_world("finger2-1.R")
+    f5 = fk.head_world("finger5-1.R")
+    knuckle = f2 - f5
+    if knuckle.length < 1e-5:
+        knuckle = (fk.world_mat("wrist.R").to_3x3() @ Vector((1.0, 0.0, 0.0))).normalized()
+    else:
+        knuckle = knuckle.normalized()
+
+    palm_normal = palm_dir.cross(knuckle)
+    if palm_normal.length < 1e-5:
+        palm_normal = Vector((0.0, 0.0, 1.0))
+    else:
+        palm_normal = palm_normal.normalized()
+
+    grip_pt = w0 + palm_dir * (0.068 * s) + palm_normal * (0.022 * s)
+
+    if aim_sole_dir is not None and aim_sole_dir.length > 1e-4:
+        s_z = (-aim_sole_dir).normalized()
+        b_hint = blade_dir_hint if (blade_dir_hint is not None and blade_dir_hint.length > 1e-4) else Vector((-0.25, -0.92, -0.28))
+        s_y = b_hint - s_z * b_hint.dot(s_z)
+        if s_y.length < 1e-4:
+            s_y = Vector((-0.25, -0.92, -0.28)) - s_z * (Vector((-0.25, -0.92, -0.28)).dot(s_z))
+        s_y = s_y.normalized()
+        s_x = s_y.cross(s_z).normalized()
+        s_y = s_z.cross(s_x).normalized()
+    else:
+        s_y = palm_dir
+        s_z = palm_normal
+        s_x = s_y.cross(s_z).normalized()
+        s_z = s_x.cross(s_y).normalized()
+
+    basis = Matrix((
+        (s_x.x, s_y.x, s_z.x),
+        (s_x.y, s_y.y, s_z.y),
+        (s_x.z, s_y.z, s_z.z),
+    ))
+    center_pos = grip_pt + s_y * 0.118 - s_z * 0.017
+    q = basis.to_quaternion()
+    if prev_quat is not None and prev_quat.dot(q) < 0.0:
+        q = -q
+
+    sandal_root.rotation_mode = "QUATERNION"
+    rec.record_vec(sandal_root, "location", frame, (center_pos.x, center_pos.y, center_pos.z))
+    rec.record_vec(sandal_root, "rotation_quaternion", frame, (q.w, q.x, q.y, q.z))
+    return grip_pt, center_pos, q
+
