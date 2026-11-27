@@ -254,12 +254,15 @@ def _polish_mas_dimas_skin_and_hair(body: bpy.types.Object) -> None:
     def _walk_skin(nt: bpy.types.NodeTree) -> None:
         for n in nt.nodes:
             if n.type == "BSDF_PRINCIPLED":
-                if "Roughness" in n.inputs and not n.inputs["Roughness"].is_linked:
-                    n.inputs["Roughness"].default_value = max(0.56, n.inputs["Roughness"].default_value)
+                # Unified Stylized Semi-Matte Look-Dev: clean soft-matte roughness 0.55-0.65 (zero glossy/creepy pores!)
+                if "Roughness" in n.inputs:
+                    for lk in list(n.inputs["Roughness"].links):
+                        nt.links.remove(lk)
+                    n.inputs["Roughness"].default_value = 0.60
                 if "Coat Weight" in n.inputs:
                     n.inputs["Coat Weight"].default_value = 0.0
                 if "Specular IOR Level" in n.inputs:
-                    n.inputs["Specular IOR Level"].default_value = 0.28
+                    n.inputs["Specular IOR Level"].default_value = 0.24
                 bc = n.inputs.get("Base Color")
                 if bc and bc.links:
                     src_sock = bc.links[0].from_socket
@@ -272,6 +275,10 @@ def _polish_mas_dimas_skin_and_hair(body: bpy.types.Object) -> None:
                         nt.links.remove(bc.links[0])
                         nt.links.new(src_sock, hsv.inputs["Color"])
                         nt.links.new(hsv.outputs["Color"], bc)
+            elif n.type in ("BUMP", "NORMAL_MAP"):
+                # Soften harsh realistic skin pore maps into clean Stylized Semi-Matte finish
+                if "Strength" in n.inputs and not n.inputs["Strength"].is_linked:
+                    n.inputs["Strength"].default_value = min(0.12, float(n.inputs["Strength"].default_value))
             elif n.type == "GROUP" and n.node_tree:
                 _walk_skin(n.node_tree)
 
@@ -503,11 +510,12 @@ def _apply_mas_dimas_crimson_outfit(cloth_obj: bpy.types.Object, arm: bpy.types.
         if "Roughness" in bsdf.inputs:
             for lk in list(bsdf.inputs["Roughness"].links):
                 nt.links.remove(lk)
-            bsdf.inputs["Roughness"].default_value = 0.86
+            # Unified Stylized Semi-Matte Look-Dev: clean soft-matte fabric roughness 0.55-0.65
+            bsdf.inputs["Roughness"].default_value = 0.62
         if "Specular IOR Level" in bsdf.inputs:
-            bsdf.inputs["Specular IOR Level"].default_value = 0.14
+            bsdf.inputs["Specular IOR Level"].default_value = 0.18
         if "Sheen Weight" in bsdf.inputs:
-            bsdf.inputs["Sheen Weight"].default_value = 0.12
+            bsdf.inputs["Sheen Weight"].default_value = 0.10
 
 
 def _add_mas_dimas_glasses(arm: bpy.types.Object) -> bpy.types.Object:

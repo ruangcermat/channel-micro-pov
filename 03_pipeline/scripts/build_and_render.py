@@ -452,6 +452,36 @@ def build_storyboard_contact_sheet(
     return grid_out_path
 
 
+def render_adaptive_storyboard_keyframes(
+    scene: bpy.types.Scene,
+    keyframes: List[Dict[str, Any]],
+    scenes_out_dir: Path,
+    apply_post: bool = True,
+) -> Path:
+    """Render an adaptive list of transition keyframes (270x480, 4 samples + OIDN) & write storyboard_keyframes.json."""
+    import json as _json
+
+    scenes_out_dir.mkdir(parents=True, exist_ok=True)
+    rendered_meta: List[Dict[str, Any]] = []
+    total = len(keyframes)
+    for idx, kf in enumerate(keyframes, start=1):
+        code = str(kf["code"])
+        fr = int(kf["frame"])
+        safe_slug = code.lower().replace(" ", "_")
+        out_png = scenes_out_dir / f"kf_{idx:02d}_{safe_slug}.png"
+        log("STORYBOARD", f"[{idx:02d}/{total:02d}] Rendering keyframe {code} (fr={fr}, t={float(kf.get('time_sec', 0.0)):.2f}s) -> {out_png.name}")
+        dt = _render_single_frame_resilient(scene, fr, out_png, apply_post=apply_post)
+        log("STORYBOARD", f"[{idx:02d}/{total:02d}] Keyframe {code} done in {dt:.1f}s (post.py={'ON' if apply_post else 'OFF'})")
+        entry = dict(kf)
+        entry["image_path"] = str(out_png.resolve())
+        rendered_meta.append(entry)
+
+    kf_json = scenes_out_dir / "storyboard_keyframes.json"
+    kf_json.write_text(_json.dumps(rendered_meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    log("STORYBOARD", f"Saved {len(rendered_meta)} adaptive keyframe descriptors -> {kf_json}")
+    return kf_json
+
+
 def build_studio_storyboard_sheet(
     spec_path: Path,
     timing_path: Path,
@@ -476,13 +506,15 @@ def build_studio_storyboard_sheet(
                 str(scenes_out_dir),
                 "--out",
                 str(sheet_out_path),
+                "--max-per-sheet",
+                "8",
             ],
             check=True,
         )
-        log("STORYBOARD", f"Studio 9-panel storyboard_sheet.png ready -> {sheet_out_path}")
+        log("STORYBOARD", f"Adaptive multi-keyframe storyboard sheets ready in {sheet_out_path.parent}")
         return sheet_out_path
     except Exception as exc:
-        log("WARN", f"Could not generate storyboard_sheet.png via {py_bin}: {exc}")
+        log("WARN", f"Could not generate storyboard sheets via {py_bin}: {exc}")
         return None
 
 
@@ -578,11 +610,26 @@ def main() -> int:
         scene.cycles.samples = int(args.samples)
         log("BLENDER", f"Sample override active: Cycles samples = {scene.cycles.samples}")
 
-    # Narrow baked frames cleanly for storyboard, single-scene, stepped playblast, or 2-frame smoke tests!
+    # Narrow baked frames cleanly for Adaptive Multi-Keyframe Storyboard, single-scene, stepped playblast, or smoke tests!
     bake_frames: Optional[List[int]] = None
+    adaptive_kfs: Optional[List[Dict[str, Any]]] = None
     frame_step = max(1, int(args.frame_step))
     max_frames = max(0, int(args.max_frames))
-    if args.mode == "storyboard" and not args.bake_all and not args.save_blend:
+    if args.mode == "storyboard" and hasattr(ep_builder, "get_storyboard_keyframes"):
+        all_kfs = ep_builder.get_storyboard_keyframes(spec, manifest, fps)
+        adaptive_kfs = (
+            [k for k in all_kfs if int(k.get("scene_id", 0)) == args.scene]
+            if args.scene is not None
+            else all_kfs
+        )
+        if not args.bake_all and not args.save_blend:
+            bf_set = {1}
+            for k in all_kfs:
+                bf_set.add(int(k["frame"]))
+            if hasattr(ep_builder, "get_storyboard_extra_frames"):
+                bf_set.update(ep_builder.get_storyboard_extra_frames(manifest, fps))
+            bake_frames = sorted(bf_set)
+    elif args.mode == "storyboard" and not args.bake_all and not args.save_blend:
         if hasattr(ep_builder, "get_storyboard_extra_frames"):
             bake_frames = ep_builder.get_storyboard_extra_frames(manifest, fps)
         else:
@@ -647,6 +694,12 @@ def main() -> int:
     scenes_out_dir.mkdir(parents=True, exist_ok=True)
     # Gate 2 motion_check skips heavy post.py by default for max speed unless final/preview/storyboard
     apply_post = (not args.no_post) and (args.mode != "motion_check")
+
+    if args.mode == "storyboard" and adaptive_kfs is not None:
+        render_adaptive_storyboard_keyframes(scene, adaptive_kfs, scenes_out_dir, apply_post=apply_post)
+        build_studio_storyboard_sheet(spec_path, timing_path, scenes_out_dir, work_dir / "storyboard_sheet_1.png")
+        log("RENDER", f"Completed Adaptive Multi-Keyframe Fast Storyboard ({len(adaptive_kfs)} panels).")
+        return 0
 
     target_ids = [args.scene] if args.scene is not None else sorted(tmap.keys())
     for sid in target_ids:

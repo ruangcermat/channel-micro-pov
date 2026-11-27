@@ -175,7 +175,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     global_chunk_idx = 0
     whisper_scenes = 0
 
-    for scene in manifest["scenes"]:
+    total_scenes = len(manifest["scenes"])
+    for sc_idx, scene in enumerate(manifest["scenes"]):
         s_start = float(scene["start_sec"])
         vo_delay = float(scene.get("vo_delay_sec", 0.0))
         vo_speed = float(scene.get("vo_speed", manifest.get("vo_speed", 1.0)))
@@ -187,11 +188,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         wav_path = _resolve_vo_wav(scene, work_dir=work_dir)
 
         if badge:
-            b_end = min(s_end - 0.10, s_start + 1.65)
-            if b_end > s_start + 0.25:
+            is_final_scene = sc_idx == total_scenes - 1
+            if is_final_scene:
+                # Anti-Spoiler Badge: hold punchline top badge until final punchline beat (~00:45.5s, NEVER at 00:41.0!)
+                b_start = min(s_end - 0.50, max(s_start + 4.54, vo_start + vo_dur - 2.35))
+                b_end = min(s_end - 0.25, b_start + 1.65)
+            else:
+                b_start = s_start
+                b_end = min(s_end - 0.10, s_start + 1.65)
+            if b_end > b_start + 0.25:
                 pop = r"{\fad(80,140)\t(0,90,\fscx106\fscy106)\t(90,170,\fscx100\fscy100)}"
                 events.append(
-                    f"Dialogue: 0,{_fmt_ass_time(s_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
+                    f"Dialogue: 0,{_fmt_ass_time(b_start)},{_fmt_ass_time(b_end)},TopBadge,,0,0,0,,{pop}{_escape_ass(badge)}"
                 )
 
         if not vo_text:
@@ -411,10 +419,12 @@ def mix_audio_and_compose(
             elif sfx_id == "human_scream_cut":
                 max_play = min(max_play, 0.35)
 
-            # Controlled per-SFX levels & EQ relative to -10 dB SFX bus
+            # Controlled per-SFX levels & EQ relative to -10 dB SFX bus (-6 dB VO reference)
             extra_gain = ""
             if sfx_id == "record_scratch":
                 extra_gain = ",afade=t=out:st=0.20:d=0.05,volume=-4dB"  # -10dB bus -4dB = -14 dB
+            elif sfx_id == "skitter_fast":
+                extra_gain = ",volume=-3.5dB"  # -10dB bus -3.5dB = -13.5 dB (~7.5 dB below -6 dB VO!)
             elif sfx_id == "wings_buzz_loud":
                 extra_gain = ",lowpass=f=1800,volume=-6dB"  # -10dB bus -6dB = -16 dB smooth
             elif sfx_id == "human_scream_cut":

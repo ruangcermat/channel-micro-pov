@@ -1,11 +1,11 @@
-# CHANNEL BIBLE — JADI APA (3D MICRO-POV INDONESIA, v2.0)
+# CHANNEL BIBLE — JADI APA (3D MICRO-POV INDONESIA, v3.0)
 
 ## 1. Identitas & Konsep Inti (RESMI DIKUNCI)
 - **Nama Channel:** **Jadi Apa** (handle cadangan: **@jadiapa3d**)
 - **Karakter Maskot Utama (Permanen):** **Mas Dimas** (`02_assets/models_3d/mas_dimas_ready.blend`)
   - Pria muda anak kosan Indonesia yang ekspresif, **tanpa kacamata** agar ekspresi mata melotot, alis, dan kepanikan terbaca 100% tajam di layar HP.
-  - **Identitas Visual Kunci:** Kaus oblong **Merah Bata / Crimson (`#A62C2B`)** bertuliskan kapital tebal putih **`JADI APA`** dengan **garis aksen kuning** di tengah dada, **rambut hitam pendek bervolume** (siluet atas-depan tegas, bukan topi renang gepeng), **kulit hangat Asia Tenggara** (*warm natural tone*), celana pendek rumahan gelap, dan kaki **nyeker** / **sandal jepit Swallow hijau** sesuai kontinuitas adegan.
-  - Muncul berulang lintas episode (Semesta Kosan, Dalam Tubuh, Jalanan) agar penonton langsung mengenali brand **Jadi Apa** dalam < 1 detik.
+  - **Identitas Visual Kunci (*Unified Stylized Semi-Matte*):** Kaus oblong **Merah Bata / Crimson (`#A62C2B`)** bertuliskan kapital tebal putih **`JADI APA`** dengan **garis aksen kuning** di tengah dada, **rambut hitam pendek bervolume**, **kulit hangat Asia Tenggara** & pakaian dengan **`roughness 0.55–0.65`** (*soft-matte* bersih tanpa pori-pori tajam menyeramkan), celana pendek rumahan gelap, dan **100% nyeker (*barefoot*)** di dalam kosan.
+  - **Jangkar Pembuka/Penutup (*Anchor Opening/Closing*):** Untuk episode non-manusia (dalam tubuh seperti Sel Darah Putih EP002, atau benda mati seperti Kabel Charger EP003), WAJIB membuka 2 detik pertama (atau menutup di ending) dengan **Mas Dimas** sebagai jangkar semesta sebelum/sesudah kamera masuk ke dunia mikro.
 - **Format:** Faceless 3D Animated Edutainment — *Micro-POV* (Sudut Pandang Orang Pertama / Kedua: *"Bayangin kamu jadi..."*).
 - **Premis Utama:** Memasukkan penonton langsung ke dalam tubuh, objek, hewan, atau situasi tertentu selama **35–42 detik** (target naskah padat **80–95 kata**). Penonton tidak menonton ceramah, melainkan "menjadi" tokoh utama di dalam mini-film yang lucu, tegang, sekaligus membuka wawasan.
 - **Target Audiens:** Audiens Indonesia lintas usia (15–35 tahun) di YouTube Shorts, TikTok, dan Instagram Reels.
@@ -24,41 +24,44 @@
   - ❌ DILARANG buka video dengan: *"Halo guys"*, *"Tahukah kamu"*, *"Pernahkah kalian berpikir"*, atau *"Secara ilmiah..."*.
   - ❌ DILARANG memakai bahasa terjemahan kaku (*"Anda kemudian mengalami..."*).
   - ✅ Kalimat pendek lisan (maksimal 10–14 kata/kalimat) + fakta sains sebagai **alasan kejadian di dalam cerita**.
-    - *Salah:* "Kecoak memiliki organ bernama cerci yang mendeteksi hembusan angin."
-    - *Benar:* "Dua antena di pantatmu langsung nangkep angin dari ayunan tangannya."
 
 ---
 
 ## 3. Rumus Retensi, Mute Test & Ending
 1. **Detik 0–3 (Hook Instan + Konflik + *Mute Test*):**
-   - Wajib lolos ***Mute Test*** (`silent_readability`): bahkan tanpa suara, penonton langsung paham siapa subjek POV dan bahayanya dalam 0,5–1 detik pertama (contoh: bayangan siluet kecoak + kuah mi berkilau + pintu kamar terbuka).
+   - Wajib lolos ***Mute Test*** (`silent_readability`): bahkan tanpa suara, penonton langsung paham siapa subjek POV dan bahayanya dalam 0,5–1 detik pertama.
 2. **Detik 4–14 (Eskalasi Pertama + Fakta Tersembunyi):** Munculkan ancaman nyata & fakta unik sebagai pemicu aksi.
-3. **Detik 15–22 (*Mid-Video Re-Hook*):** Wajib ada lonjakan ketegangan/twist baru di pertengahan video agar kurva retensi tidak turun (contoh: jalur kabur diblokir kaki bersandal / buntu total).
+3. **Detik 15–22 (*Mid-Video Re-Hook*):** Wajib ada lonjakan ketegangan/twist baru di pertengahan video agar kurva retensi tidak turun.
 4. **Detik 23–38 (Klimaks & Payoff):** Puncak aksi absurd/relatable dengan ekspresi maksimal Mas Dimas.
-5. **Ending Tajam (`ending_type`):** Wajib pilih salah satu — **`hard_cut_punchline`** (potong langsung ke hitam di puncak tawa/teriakan) atau **`seamless_loop`** (kalimat akhir nyambung mulus ke kalimat pembuka). Tanpa penutup basa-basi (*"Jangan lupa like & subscribe"*).
+5. **Ending Tajam (`ending_type`):** Wajib pilih **`hard_cut_punchline`** atau **`seamless_loop`**. **Anti-Spoiler Badge:** Jangan munculkan badge punchline di awal scene terakhir; tunda sampai detik punchline atau kosongkan.
 
 ---
 
-## 4. Standar Visual, Golden Hero Zone 9:16 & 4-Layer Audio Mix
-- **Visual & Look-Dev:** Blender 5.2.2 LTS + **MPFB2 (Mas Dimas)** + properti nyata **Poly Haven CC0** + **AgX Medium High Contrast** + **Macro DOF** + camera finish **`post.py`**.
-- **5 Arketipe Kamera POV (`core/camera_presets.py`):** `insect_ground`, `aerial_erratic`, `fluid_float`, `static_object_pov`, `human_first_person` + *floor clamp* + *motion blur* (`shutter=0.40`) + *secondary motion*.
-- **Golden Hero Zone 9:16 (`1080×1920`):**
-  - Seluruh wajah ekspresif, tangan menggenggam prop, dan subjek hero WAJIB berada di dalam **`x: 100–900px, y: 260–1250px`** (aman 100% dari bar atas, ikon kanan TikTok/Shorts/Reels, dan subtitle `MarginV=380`).
+## 4. Unified Look-Dev, Hybrid Pipeline, Golden Hero Zone & 4-Layer Audio
+- **Unified Look-Dev (*Stylized Semi-Matte*):** 1 bahasa visual tunggal untuk seluruh channel — `roughness 0.55–0.65` bertekstur halus (manusia maupun objek non-manusia, BUKAN bola polos mentah) + **`AgX Medium High Contrast` + `Macro DOF` + `post.py`**.
+- **Hybrid Production Pipeline (`render_pipeline`):**
+  - `blender_3d` *(Default)*: Adegan POV bergerak di ruang 3D nyata (*whip-pan* 180°, perubahan FOV, *floor clamp*).
+  - `parallax_25d`: Khusus adegan `static_object_pov` tenang tanpa perpindahan tempat.
+  - `ai_i2v`: Khusus episode **Semesta Sejarah / Alam Ekstrem** berskala masif (Krakatau 1883, tsunami/kerumunan) via Google Flow / Veo.
+- **5 Arketipe Kamera POV (`core/camera_presets.py`):** `insect_ground`, `aerial_erratic`, `fluid_float`, `static_object_pov`, `human_first_person` + *floor clamp* + *motion blur* (`shutter=0.40` saat final).
+- **Golden Hero Zone 9:16 (`1080×1920`):** Wajah ekspresif & aksi utama WAJIB di **`x: 100–900px, y: 260–1250px`** (aman 100% dari bar atas, UI kanan, dan subtitle `MarginV=380`).
 - **4-Layer Audio Mix (Master `-14 LUFS`):**
-  1. **VO (`-6 dB`):** Gemini 3.8 Flash TTS (`Puck`), *micro-fade* `15 ms` tiap potongan scene, subtitle karaoke presisi milidetik via **`faster-whisper`** (`word_timestamps=True`).
-  2. **SFX (`-10 dB`):** Aksen fisik tajam sesuai beat animasi (saklar, hentakan sandal, deru sayap, teriakan).
+  1. **VO (`-6 dB`):** Gemini 3.8 Flash TTS (`Puck`, cached), *micro-fade* `15 ms`, subtitle karaoke **`faster-whisper`** (`1 / VO_SPEED`, filter anti-hallucination).
+  2. **SFX (`-10 dB`):** Aksen fisik tajam sesuai beat animasi (`skitter_fast` diturunkan `-7 dB` di bawah VO).
   3. **BGM (`-22 dB`):** Auto-ducking otomatis saat VO aktif.
-  4. **Room Tone (`-32 dB`):** Lapisan ambien ruangan kontinu sesuai latar (contoh: `night_fridge_hum` untuk dapur kosan jam 2 pagi).
+  4. **Room Tone (`-32 dB`):** Ambien kontinu (`night_fridge_hum`, dll.).
 
 ---
 
-## 5. 4-Pass Writer's Room & 2 Hard Gate Produksi
-Setiap episode baru (`EP002–EP100+`) WAJIB melewati **4-Pass Writer's Room** sebelum menulis kode 3D:
-- **Pass 1 — Premis, Hook & Draf Naskah:** Kunci premis POV, jumlah kata **80–95 kata**, *Mid-Video Re-Hook* detik 15–22, dan `ending_type`.
-- **Pass 2 — Ritme Lisan, Ejaan Angka & Mute Test:** Pastikan nol angka mentah di VO, kalimat lisan cepat, dan isi field `silent_readability`.
-- **Pass 2.5 — Audit Logika Fisik (*Physical Logic Audit*):** Wajib isi **`spatial_plan`** (pintu masuk/keluar, jalur jalan karakter, lokasi saklar/jam statis) dan **`prop_state_chain`** (asal-usul & perpindahan setiap benda dari awal sampai akhir, termasuk tulang parent & kontak tanah).
-- **Pass 3 — Kompilasi `epXXX_spec.json` & Validasi Schema:** Validasi ketat terhadap `03_pipeline/spec_schema.json`.
+## 5. 4-Pass Writer's Room & Adaptive Multi-Keyframe Fast Storyboard Gate
+Setiap episode baru (`EP002–EP100+`) WAJIB melewati **4-Pass Writer's Room**:
+- **Pass 1:** Premis, Hook, 80–95 kata, *Mid-Video Re-Hook*, `ending_type`, `render_pipeline`, & `anchor_mascot` (jika non-manusia).
+- **Pass 2:** Ritme lisan, ejaan angka, & `silent_readability` (*Mute Test*).
+- **Pass 2.5 (Audit Logika Fisik & Hukum Anti-Senam Tulang):** Wajib isi `spatial_plan` & `prop_state_chain` dengan **titik ambil properti statis** (rak, meja, nakas — DILARANG melepas alas kaki/pakaian dari rig bergerak!).
+- **Pass 3:** Kompilasi `epXXX_spec.json` & validasi ketat `03_pipeline/spec_schema.json`.
 
-Dilanjutkan **2 Hard Gate Visual** sebelum render final:
-1. **Hard Gate 1 — Fast Draft Storyboard (`--mode storyboard`, `270×480`, 4 samples < 1 menit):** Agen wajib Self-QC visual seluruh 9 panel lalu tampilkan `storyboard_sheet.png`. **STOP** hingga user membalas **`ACC STORYBOARD`**.
-2. **Hard Gate 2 — Motion Check (`--mode motion_check`, `360×640`, 8 samples + VO/SFX/BGM/Room Tone/Subtitle):** Cek rasa gerak kamera, akting, dan Golden Hero Zone sebelum render **`final`** (`1080×1920`, 24fps, 24 samples).
+**Gate Produksi Tunggal Sebelum Render Final:**
+1. **Adaptive Multi-Keyframe Fast Storyboard (`--mode storyboard`, `270×480`, 4 samples + OIDN, ~1–2 menit):**
+   - Menggantikan video `motion_check`! Render **sebanyak keyframe yang diperlukan** (dikelompokkan rapi maks. 8–9 panel/sheet: `storyboard_sheet_1.png`, `storyboard_sheet_2.png`, dst.) mencakup seluruh transisi gerakan penting + **simulasi kotak subtitle ending**.
+   - Agen WAJIB **Self-QC Vision** lalu **STOP TOTAL** menunggu balasan **`ACC STORYBOARD`** dari user.
+2. **Final Render (`--mode final`, `1080×1920`, 24fps, `24 samples` + motion blur + `post.py`):** Hanya dijalankan setelah **`ACC STORYBOARD`**.

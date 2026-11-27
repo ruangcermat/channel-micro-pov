@@ -31,6 +31,25 @@
     "target_duration_sec": {
       "type": "number"
     },
+    "render_pipeline": {
+      "type": "string",
+      "description": "Hybrid Production Pipeline mode: blender_3d (default moving 3D POV), parallax_25d (calm static_object_pov), or ai_i2v (massive historical/nature scale via Google Flow / Veo).",
+      "enum": [
+        "blender_3d",
+        "parallax_25d",
+        "ai_i2v"
+      ],
+      "default": "blender_3d"
+    },
+    "anchor_mascot": {
+      "type": "object",
+      "description": "Anchor Opening/Closing framing featuring Mas Dimas for non-human (inside-body or object) episodes.",
+      "properties": {
+        "opening_sec": { "type": "number" },
+        "closing_sec": { "type": "number" },
+        "context": { "type": "string" }
+      }
+    },
     "ending_type": {
       "type": "string",
       "enum": [
@@ -194,6 +213,14 @@
           },
           "vo_delivery": {
             "type": "string"
+          },
+          "render_pipeline": {
+            "type": "string",
+            "enum": [
+              "blender_3d",
+              "parallax_25d",
+              "ai_i2v"
+            ]
           },
           "camera_archetype": {
             "type": "string",

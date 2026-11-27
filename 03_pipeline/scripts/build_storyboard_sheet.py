@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
-"""Build a studio-grade 9-panel `storyboard_sheet.png` (3x3 layout) with metadata cards.
+"""Adaptive Multi-Keyframe Fast Storyboard Sheet Builder (`Jadi Apa` Studio v3.0).
 
-Panels:
-  01A (Remang Jam 2) | 01B (Lampu Nyala) | 02 (Boss Terakhir)
-  03 (Cheat Code)    | 04 (300 KM/JAM)   | 05 (Tinggal Sejengkal)
-  06 (Terkepung!)    | 07 (Mode Terbang) | 08 (Maaf Ya Bang)
-
-Each panel displays the rendered frame (post.py applied) + a readable card below with:
-  - Scene & Waktu
-  - Aksi & Kamera
-  - VO
-  - SFX / BGM
+Automatically groups ANY number of rendered transition keyframes (`storyboard_keyframes.json`)
+into crisp multi-sheet PNGs (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, ...) with
+up to 8–9 panels per sheet (4x2 for <=8/sheet or 3x3 for 9/sheet), complete with:
+  - Top panel badge (`01A · 00:00.5`)
+  - Optional simulated 9:16 karaoke subtitle safe-zone overlay (e.g. ending `"MAAF YA, BANG."`
+    at `MarginV=380` + delayed top badge check!) so facial clearance is visually proven BEFORE final render!
+  - Readable metadata card below each panel (`Scene & Waktu`, `Aksi & Kamera`, `VO`, `SFX / BGM`).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import textwrap
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -42,21 +38,11 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 
-def _fmt_mmss(sec: float) -> str:
+def _fmt_mmss_dec(sec: float) -> str:
     sec = max(0.0, float(sec))
     m = int(sec // 60)
-    s = int(round(sec - m * 60))
-    if s == 60:
-        m += 1
-        s = 0
-    return f"{m:02d}:{s:02d}"
-
-
-def _bgm_for_scene(spec: Dict[str, Any], sid: int) -> str:
-    for b in spec.get("bgm_plan", []):
-        if int(b.get("start_scene", 0)) <= sid <= int(b.get("end_scene", 0)):
-            return str(b.get("bgm_id", "none"))
-    return "none"
+    s = sec - m * 60
+    return f"{m:02d}:{s:04.1f}"
 
 
 def _wrap_pixel_lines(
@@ -93,123 +79,128 @@ def _wrap_pixel_lines(
     return lines
 
 
-def _compact_action_summary(sid: int, sub_tag: Optional[str], scene_spec: Dict[str, Any]) -> str:
-    """Concise 1-line Indonesian Aksi & Kamera summary tailored for mobile/studio storyboard reading."""
-    overrides = {
-        (1, "A"): "Remang biru + cahaya hangat pintu kamar kanan; Mas Dimas keluar menuju saklar kanan kulkas (2 sandal ijo).",
-        (1, "B"): "Lampu nyala + snap_jerk; Mas Dimas tekan saklar kanan kulkas & kaget (2 sandal di kaki, tangan kosong).",
-        (2, None): "Low-angle + handheld_breath; Mas Dimas ancang-ancang geplak datar (kanan nyeker, kiri bersandal ijo).",
-        (3, None): "Bullet-time miring; sandal kanan mengayun datar ke bawah + angin cyan membengkokkan antena.",
-        (4, None): "Sandal kanan menghantam lantai + debu tipis + impact_bump & fov_rush 95°->112° menuju kulkas.",
-        (5, None): "Sprint lurus ke kolong kulkas 5,5 cm; kaki KIRI Mas Dimas (sandal ijo di atas lantai) menutup jalur.",
-        (6, None): "Whip-pan kiri-kanan-atas; kaki kiri bersandal blokir kolong, tangan kanan geplak datar siap hantam.",
-        (7, None): "Sayap amber berurat rapid flutter di tepi lensa; kamera aerial_erratic oleng naik ke arah Mas Dimas.",
-        (8, None): "Wajah panik Mas Dimas di upper-third (bayangan gelap + rim tajam), sandal lepas mid-air, sayap amber.",
-    }
-    if (sid, sub_tag) in overrides:
-        return overrides[(sid, sub_tag)]
-    cam = str(scene_spec.get("camera_motion", "")).strip()
-    act = str(scene_spec.get("visual_action", "")).strip()
-    return f"{cam} | {act}" if cam else act
+def _draw_simulated_subtitle_overlay(
+    im: Image.Image,
+    subtitle_text: str,
+    top_badge_text: Optional[str] = None,
+) -> Image.Image:
+    """Draw exact 9:16 ASS MarginV=380 subtitle & safe-zone box onto a panel for Gate 1 visual verification!"""
+    out = im.convert("RGBA")
+    overlay = Image.new("RGBA", out.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    w, h = out.size
+
+    # Scale exact 1080x1920 ASS coordinates to panel size
+    sx = w / 1080.0
+    sy = h / 1920.0
+
+    # Subtle dashed-feel safe-zone guide rectangle for bottom TikTok/Shorts UI (MarginV=380 -> y=1540..1920)
+    margin_v_px = int(round(380.0 * sy))
+    sub_bottom_y = h - margin_v_px
+    margin_lr_px = int(round(95.0 * sx))
+
+    # Faint translucent box showing exact subtitle safe-zone band (above bottom UI!)
+    box_h = int(round(92.0 * sy))
+    box_y0 = sub_bottom_y - box_h
+    box_y1 = sub_bottom_y + int(round(12.0 * sy))
+    draw.rounded_rectangle(
+        [(margin_lr_px, box_y0), (w - margin_lr_px, box_y1)],
+        radius=max(4, int(round(12.0 * sx))),
+        fill=(0, 0, 0, 125),
+        outline=(250, 204, 21, 220),
+        width=max(1, int(round(3.0 * sx))),
+    )
+
+    # Render simulated karaoke text (56pt on 1080x1920) with thick black stroke
+    f_sub = _load_font(max(14, int(round(56.0 * sy))), bold=True)
+    text_upper = subtitle_text.upper()
+    tb = draw.textbbox((0, 0), text_upper, font=f_sub)
+    tw = tb[2] - tb[0]
+    th = tb[3] - tb[1]
+    tx = (w - tw) // 2
+    ty = box_y0 + (box_y1 - box_y0 - th) // 2 - int(round(4.0 * sy))
+    stroke_w = max(2, int(round(5.0 * sx)))
+    draw.text(
+        (tx, ty),
+        text_upper,
+        font=f_sub,
+        fill=(255, 234, 0, 255),
+        stroke_width=stroke_w,
+        stroke_fill=(0, 0, 0, 255),
+    )
+
+    # Tiny safe-zone label right below the subtitle box
+    f_lbl = _load_font(max(10, int(round(22.0 * sy))), bold=True)
+    lbl_text = "SIMULASI SUBTITLE (MarginV=380 · AMAN UI BAWAH)"
+    lb = draw.textbbox((0, 0), lbl_text, font=f_lbl)
+    lw = lb[2] - lb[0]
+    draw.text(((w - lw) // 2, box_y1 + int(round(10.0 * sy))), lbl_text, font=f_lbl, fill=(250, 204, 21, 235))
+
+    # Optional delayed top badge simulation (MarginV=260 from top)
+    if top_badge_text:
+        f_top = _load_font(max(12, int(round(42.0 * sy))), bold=True)
+        bt = top_badge_text.upper()
+        bb = draw.textbbox((0, 0), bt, font=f_top)
+        btw = bb[2] - bb[0]
+        bth = bb[3] - bb[1]
+        by = int(round(260.0 * sy))
+        pad_x = int(round(18.0 * sx))
+        pad_y = int(round(8.0 * sy))
+        draw.rounded_rectangle(
+            [(w // 2 - btw // 2 - pad_x, by - pad_y), (w // 2 + btw // 2 + pad_x, by + bth + pad_y)],
+            radius=max(3, int(round(8.0 * sx))),
+            fill=(0, 0, 0, 175),
+        )
+        draw.text((w // 2 - btw // 2, by - int(round(2.0 * sy))), bt, font=f_top, fill=(255, 234, 0, 255))
+
+    return Image.alpha_composite(out, overlay).convert("RGB")
 
 
-def _build_panel_specs(
+def _partition_sheets(panels: List[Dict[str, Any]], max_per_sheet: int = 8) -> List[List[Dict[str, Any]]]:
+    """Split arbitrary keyframe count cleanly into balanced sheets (<= max_per_sheet panels each)."""
+    n = len(panels)
+    if n == 0:
+        return []
+    if n <= 9 and max_per_sheet >= 9:
+        return [panels]
+    if n <= max_per_sheet:
+        return [panels]
+    # Balance panels across minimum number of sheets (max 8 or 9 per sheet)
+    num_sheets = (n + max_per_sheet - 1) // max_per_sheet
+    base = n // num_sheets
+    rem = n % num_sheets
+    sheets: List[List[Dict[str, Any]]] = []
+    idx = 0
+    for i in range(num_sheets):
+        sz = base + (1 if i < rem else 0)
+        sheets.append(panels[idx : idx + sz])
+        idx += sz
+    return sheets
+
+
+def _render_single_sheet(
     spec: Dict[str, Any],
     manifest: Dict[str, Any],
-    scenes_dir: Path,
-) -> List[Dict[str, Any]]:
-    smap = {int(s["scene_id"]): s for s in spec.get("scenes", [])}
-    tmap = {int(s["scene_id"]): s for s in manifest.get("scenes", [])}
-
-    panels: List[Dict[str, Any]] = []
-
-    # Panel 1: 01A (Remang Jam 2, 0.0-1.05s)
-    s1 = smap[1]
-    t1 = tmap[1]
-    t1_end = float(t1.get("end_sec", 7.3))
-    panels.append(
-        {
-            "code": "01A",
-            "title": "REMANG JAM 2",
-            "time_range": "00:00–00:01",
-            "image_path": scenes_dir / "scene_01a.png",
-            "action": _compact_action_summary(1, "A", s1),
-            "vo": "Jam dua pagi...",
-            "sfx_bgm": "SFX: ambient malam | Room: night_fridge_hum (-32dB) | BGM: sneaky_night_loop",
-            "accent": (96, 165, 250),
-        }
-    )
-
-    # Panel 2: 01B (Lampu Nyala, 1.05s - end of scene 1)
-    panels.append(
-        {
-            "code": "01B",
-            "title": "LAMPU NYALA",
-            "time_range": f"00:01–{_fmt_mmss(t1_end)}",
-            "image_path": scenes_dir / "scene_01b.png" if (scenes_dir / "scene_01b.png").exists() else scenes_dir / "scene_01.png",
-            "action": _compact_action_summary(1, "B", s1),
-            "vo": "Lampu dapur mendadak nyala. Masalahnya, kamu lagi jadi kecoak yang kepergok nyeruput kuah mi.",
-            "sfx_bgm": "SFX: light_switch_click (1.0s), fluorescent_hum (1.1s) | BGM: sneaky_night_loop",
-            "accent": (250, 204, 21),
-        }
-    )
-
-    accents = {
-        2: (248, 113, 113),
-        3: (34, 211, 238),
-        4: (74, 222, 128),
-        5: (251, 146, 60),
-        6: (244, 63, 94),
-        7: (245, 158, 11),
-        8: (192, 132, 252),
-    }
-    for sid in range(2, 9):
-        if sid not in smap or sid not in tmap:
-            continue
-        sc = smap[sid]
-        tm = tmap[sid]
-        cues = sc.get("sfx_cues", [])
-        sfx_str = ", ".join(f"{c['sfx_id']} ({c.get('offset_sec', 0):.1f}s)" for c in cues) if cues else "none"
-        bgm_str = _bgm_for_scene(spec, sid)
-        panels.append(
-            {
-                "code": f"{sid:02d}",
-                "title": str(sc.get("on_screen_text", f"SCENE {sid:02d}")).upper(),
-                "time_range": f"{_fmt_mmss(tm['start_sec'])}–{_fmt_mmss(tm['end_sec'])}",
-                "image_path": scenes_dir / f"scene_{sid:02d}.png",
-                "action": _compact_action_summary(sid, None, sc),
-                "vo": str(sc.get("vo_text", "")),
-                "sfx_bgm": f"SFX: {sfx_str} | BGM: {bgm_str}",
-                "accent": accents.get(sid, (250, 204, 21)),
-            }
-        )
-
-    return panels
-
-
-def build_storyboard_sheet(
-    spec_path: Path,
-    timing_path: Path,
-    scenes_dir: Path,
+    sheet_panels: List[Dict[str, Any]],
+    sheet_idx: int,
+    total_sheets: int,
+    total_panels: int,
     out_path: Path,
 ) -> Path:
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    manifest = json.loads(timing_path.read_text(encoding="utf-8"))
-    panels = _build_panel_specs(spec, manifest, scenes_dir)
+    count = len(sheet_panels)
+    cols = 4 if count in (4, 7, 8) else (3 if count >= 3 else count)
+    rows = (count + cols - 1) // cols
 
-    cols = 3
-    rows = (len(panels) + cols - 1) // cols
-
-    panel_w = 450
-    panel_h = 800
-    card_h = 268
+    panel_w = 360
+    panel_h = 640
+    card_h = 228
     cell_w = panel_w
     cell_h = panel_h + card_h
-    gap_x = 28
-    gap_y = 32
-    margin_x = 36
-    margin_top = 112
-    margin_bot = 40
+    gap_x = 22
+    gap_y = 26
+    margin_x = 30
+    margin_top = 104
+    margin_bot = 32
 
     canvas_w = margin_x * 2 + cols * cell_w + (cols - 1) * gap_x
     canvas_h = margin_top + rows * cell_h + (rows - 1) * gap_y + margin_bot
@@ -217,18 +208,18 @@ def build_storyboard_sheet(
     canvas = Image.new("RGB", (canvas_w, canvas_h), (10, 14, 24))
     draw = ImageDraw.Draw(canvas)
 
-    f_header = _load_font(28, bold=True)
-    f_sub = _load_font(15, bold=False)
-    f_badge = _load_font(18, bold=True)
-    f_card_title = _load_font(15, bold=True)
-    f_card_title_sm = _load_font(13, bold=True)
-    f_label = _load_font(13, bold=True)
-    f_body = _load_font(14, bold=False)
-    f_small = _load_font(13, bold=False)
+    f_header = _load_font(25, bold=True)
+    f_sub = _load_font(14, bold=False)
+    f_badge = _load_font(15, bold=True)
+    f_card_title = _load_font(14, bold=True)
+    f_card_title_sm = _load_font(12, bold=True)
+    f_label = _load_font(12, bold=True)
+    f_body = _load_font(13, bold=False)
+    f_small = _load_font(12, bold=False)
 
     # Top Studio Header Banner
-    draw.rectangle([(0, 0), (canvas_w, margin_top - 16)], fill=(15, 23, 42))
-    draw.rectangle([(0, margin_top - 19), (canvas_w, margin_top - 16)], fill=(250, 204, 21))
+    draw.rectangle([(0, 0), (canvas_w, margin_top - 14)], fill=(15, 23, 42))
+    draw.rectangle([(0, margin_top - 17), (canvas_w, margin_top - 14)], fill=(250, 204, 21))
 
     channel = spec.get("channel", "Jadi Apa")
     mascot = spec.get("mascot", "Mas Dimas")
@@ -238,23 +229,28 @@ def build_storyboard_sheet(
     fps = int(manifest.get("fps", 24))
     vo_speed = float(manifest.get("vo_speed", 1.0))
 
-    draw.text((margin_x, 18), f"{channel.upper()} — {ep_id} STORYBOARD SHEET: {ep_title}", fill=(248, 250, 252), font=f_header)
+    sheet_tag = f"SHEET {sheet_idx}/{total_sheets}" if total_sheets > 1 else "STORYBOARD SHEET"
     draw.text(
-        (margin_x, 58),
-        f"Maskot: {mascot}  |  9 Panel (01A–08)  |  Durasi: {total_dur:.2f}s ({int(manifest.get('total_frames', 0))} fr @ {fps}fps)  |  "
-        f"VO: Puck ({vo_speed:.2f}x) + faster-whisper + Room Tone -32dB  |  AgX + Macro DOF + post.py",
+        (margin_x, 16),
+        f"{channel.upper()} — {ep_id} ADAPTIVE MULTI-KEYFRAME {sheet_tag}: {ep_title}",
+        fill=(248, 250, 252),
+        font=f_header,
+    )
+    draw.text(
+        (margin_x, 54),
+        f"Maskot: {mascot} (Semi-Matte 0.60, 100% Nyeker)  |  Panel {count} dari {total_panels} Keyframe  |  "
+        f"Durasi: {total_dur:.2f}s ({int(manifest.get('total_frames', 0))} fr @ {fps}fps, VO {vo_speed:.2f}x)  |  AgX + Macro DOF + post.py",
         fill=(148, 163, 184),
         font=f_sub,
     )
 
-    for idx, p in enumerate(panels):
+    for idx, p in enumerate(sheet_panels):
         col = idx % cols
         row = idx // cols
         x0 = margin_x + col * (cell_w + gap_x)
         y0 = margin_top + row * (cell_h + gap_y)
-        accent = p["accent"]
+        accent = tuple(p.get("accent", (250, 204, 21)))
 
-        # Outer card frame border
         draw.rectangle(
             [(x0 - 2, y0 - 2), (x0 + cell_w + 2, y0 + cell_h + 2)],
             fill=(17, 24, 39),
@@ -262,94 +258,134 @@ def build_storyboard_sheet(
             width=2,
         )
 
-        # Panel Image
-        img_path: Path = p["image_path"]
+        img_path = Path(p["image_path"])
         if img_path.exists():
             im = Image.open(img_path).convert("RGB")
             if im.size != (panel_w, panel_h):
                 im = im.resize((panel_w, panel_h), Image.Resampling.LANCZOS)
+            sub_ov = p.get("subtitle_overlay")
+            if sub_ov:
+                im = _draw_simulated_subtitle_overlay(im, str(sub_ov), top_badge_text=p.get("top_badge_overlay"))
             canvas.paste(im, (x0, y0))
         else:
             draw.rectangle([(x0, y0), (x0 + panel_w, y0 + panel_h)], fill=(30, 41, 59))
-            draw.text((x0 + 24, y0 + panel_h // 2), f"MISSING: {img_path.name}", fill=(248, 113, 113), font=f_badge)
+            draw.text((x0 + 18, y0 + panel_h // 2), f"MISSING: {img_path.name}", fill=(248, 113, 113), font=f_badge)
 
-        # Top-left Panel Badge Pill on Image
-        badge_text = f"{p['code']} · {p['title']}"
+        # Top-left Panel Badge Pill
+        t_str = _fmt_mmss_dec(float(p.get("time_sec", 0.0)))
+        badge_text = f"{p['code']} · {t_str}"
         bb = draw.textbbox((0, 0), badge_text, font=f_badge)
-        bw = (bb[2] - bb[0]) + 22
-        bh = (bb[3] - bb[1]) + 14
+        bw = (bb[2] - bb[0]) + 18
+        bh = (bb[3] - bb[1]) + 12
         draw.rounded_rectangle(
-            [(x0 + 12, y0 + 12), (x0 + 12 + bw, y0 + 12 + bh)],
-            radius=6,
+            [(x0 + 10, y0 + 10), (x0 + 10 + bw, y0 + 10 + bh)],
+            radius=5,
             fill=(10, 14, 24),
             outline=accent,
             width=2,
         )
-        draw.text((x0 + 23, y0 + 17), badge_text, fill=accent, font=f_badge)
+        draw.text((x0 + 19, y0 + 14), badge_text, fill=accent, font=f_badge)
 
-        # Bottom Metadata Info Card
+        # Bottom Metadata Card
         cy = y0 + panel_h
         draw.rectangle([(x0, cy), (x0 + cell_w, cy + card_h)], fill=(15, 23, 42))
         draw.rectangle([(x0, cy), (x0 + cell_w, cy + 4)], fill=accent)
 
-        pad = 14
+        pad = 12
         max_tw = cell_w - pad * 2
-        cur_y = cy + 12
+        cur_y = cy + 10
 
-        # Row 1: Scene & Waktu (auto-shrink font if title is wide so zero clipping!)
-        header_line = f"Scene {p['code']} | {p['time_range']} · {p['title']}"
-        hb = draw.textbbox((0, 0), header_line, font=f_card_title)
-        title_font = f_card_title if (hb[2] - hb[0]) <= max_tw else f_card_title_sm
+        header_line = f"{p['code']} | {t_str} · {p['title']}"
+        title_font = f_card_title
+        for sz in (14, 13, 12, 11, 10):
+            cand = _load_font(sz, bold=True)
+            hb = draw.textbbox((0, 0), header_line, font=cand)
+            title_font = cand
+            if (hb[2] - hb[0]) <= max_tw:
+                break
         draw.text((x0 + pad, cur_y), header_line, fill=accent, font=title_font)
-        cur_y += 26
+        cur_y += 22
 
-        # Divider
         draw.line([(x0 + pad, cur_y), (x0 + cell_w - pad, cur_y)], fill=(30, 41, 59), width=1)
-        cur_y += 8
+        cur_y += 6
 
-        # Row 2: Aksi & Kamera
         draw.text((x0 + pad, cur_y), "AKSI & KAMERA", fill=(148, 163, 184), font=f_label)
-        cur_y += 17
-        for line in _wrap_pixel_lines(draw, p["action"], f_body, max_tw, max_lines=2):
+        cur_y += 15
+        for line in _wrap_pixel_lines(draw, str(p.get("action", "")), f_body, max_tw, max_lines=3):
             draw.text((x0 + pad, cur_y), line, fill=(226, 232, 240), font=f_body)
-            cur_y += 19
-        cur_y += 6
-
-        # Row 3: VO
-        draw.text((x0 + pad, cur_y), "VO", fill=(250, 204, 21), font=f_label)
-        cur_y += 17
-        vo_quote = f"\"{p['vo']}\""
-        for line in _wrap_pixel_lines(draw, vo_quote, f_body, max_tw, max_lines=3):
-            draw.text((x0 + pad, cur_y), line, fill=(248, 250, 252), font=f_body)
-            cur_y += 19
-        cur_y += 6
-
-        # Row 4: SFX / BGM
-        draw.text((x0 + pad, cur_y), "SFX / BGM", fill=(56, 189, 248), font=f_label)
-        cur_y += 17
-        for line in _wrap_pixel_lines(draw, p["sfx_bgm"], f_small, max_tw, max_lines=2):
-            draw.text((x0 + pad, cur_y), line, fill=(186, 230, 253), font=f_small)
             cur_y += 17
+        cur_y += 5
+
+        draw.text((x0 + pad, cur_y), "VO", fill=(250, 204, 21), font=f_label)
+        cur_y += 15
+        vo_quote = f"\"{p.get('vo', '')}\""
+        for line in _wrap_pixel_lines(draw, vo_quote, f_body, max_tw, max_lines=2):
+            draw.text((x0 + pad, cur_y), line, fill=(248, 250, 252), font=f_body)
+            cur_y += 17
+        cur_y += 5
+
+        draw.text((x0 + pad, cur_y), "SFX / BGM", fill=(56, 189, 248), font=f_label)
+        cur_y += 15
+        for line in _wrap_pixel_lines(draw, str(p.get("sfx_bgm", "")), f_small, max_tw, max_lines=2):
+            draw.text((x0 + pad, cur_y), line, fill=(186, 230, 253), font=f_small)
+            cur_y += 15
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(out_path, format="PNG", optimize=True)
-    print(f"[STORYBOARD] 9-panel studio sheet ready ({canvas_w}x{canvas_h}) -> {out_path}")
+    print(f"[STORYBOARD] Adaptive sheet {sheet_idx}/{total_sheets} ({count} panels, {canvas_w}x{canvas_h}) -> {out_path}")
     return out_path
 
 
+def build_storyboard_sheets(
+    spec_path: Path,
+    timing_path: Path,
+    scenes_dir: Path,
+    out_dir_or_file: Path,
+    max_per_sheet: int = 8,
+) -> List[Path]:
+    """Assemble adaptive multi-keyframe storyboard sheets (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, ...)."""
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    manifest = json.loads(timing_path.read_text(encoding="utf-8"))
+
+    kf_json = scenes_dir / "storyboard_keyframes.json"
+    if not kf_json.exists():
+        raise FileNotFoundError(
+            f"storyboard_keyframes.json not found at {kf_json}. Run build_and_render.py --mode storyboard first."
+        )
+    panels = json.loads(kf_json.read_text(encoding="utf-8"))
+
+    out_dir = out_dir_or_file.parent if out_dir_or_file.suffix.lower() == ".png" else out_dir_or_file
+    sheets = _partition_sheets(panels, max_per_sheet=max_per_sheet)
+    written: List[Path] = []
+    for idx, sp in enumerate(sheets, start=1):
+        sheet_out = out_dir / f"storyboard_sheet_{idx}.png"
+        _render_single_sheet(spec, manifest, sp, idx, len(sheets), len(panels), sheet_out)
+        written.append(sheet_out)
+
+    # Remove any stale extra sheet files from prior runs
+    for extra_idx in range(len(sheets) + 1, 12):
+        stale = out_dir / f"storyboard_sheet_{extra_idx}.png"
+        if stale.exists():
+            stale.unlink()
+
+    return written
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build 9-panel studio storyboard_sheet.png")
+    parser = argparse.ArgumentParser(description="Build adaptive multi-keyframe studio storyboard sheets")
     parser.add_argument("--spec", type=str, required=True)
     parser.add_argument("--timing", type=str, required=True)
     parser.add_argument("--scenes-dir", type=str, required=True)
     parser.add_argument("--out", type=str, required=True)
+    parser.add_argument("--max-per-sheet", type=int, default=8)
     args = parser.parse_args()
 
-    build_storyboard_sheet(
+    build_storyboard_sheets(
         Path(args.spec).resolve(),
         Path(args.timing).resolve(),
         Path(args.scenes_dir).resolve(),
         Path(args.out).resolve(),
+        max_per_sheet=max(1, min(9, int(args.max_per_sheet))),
     )
     return 0
 

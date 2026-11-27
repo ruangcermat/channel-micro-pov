@@ -551,6 +551,84 @@ def build_kitchen_tile_floor(
         "floor": floor,
         "neon_tube": neon_tube,
         "neon_mat": neon_tube_mat,
+        "door_pivot": door_pivot,
+    }
+
+
+def build_kosan_shoe_rack(
+    location: Tuple[float, float, float] = (1.04, 3.36, 0.0),
+    collection: Optional[bpy.types.Collection] = None,
+) -> Dict[str, Any]:
+    """Build a simple low 2-tier Indonesian wooden kosan shoe rack under the 02:00 wall clock.
+
+    - Top tier (z=0.335m): holds the pair of green Swallow flip-flops (`slot_left`, `slot_right`).
+    - Bottom tier (z=0.095m): holds 1 pair of stylized casual dark sneakers with cream soles (semi-matte).
+    """
+    root = _make_empty("Kosan_ShoeRack_Root", location, collection=collection)
+    wood_mat = make_material("Mat_ShoeRack_Wood", (0.28, 0.17, 0.09, 1.0), roughness=0.60)
+    wood_dark = make_material("Mat_ShoeRack_Post", (0.22, 0.13, 0.07, 1.0), roughness=0.62)
+    shoe_upper = make_material("Mat_CasualShoe_Upper", (0.09, 0.11, 0.16, 1.0), roughness=0.60)
+    shoe_sole = make_material("Mat_CasualShoe_Sole", (0.76, 0.74, 0.70, 1.0), roughness=0.58)
+    shoe_lace = make_material("Mat_CasualShoe_Lace", (0.82, 0.80, 0.78, 1.0), roughness=0.62)
+
+    w, d, h = 0.66, 0.28, 0.36
+    post_t = 0.026
+    # 4 sturdy vertical corner legs
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            _make_beveled_box(
+                f"ShoeRack_Leg_{'R' if sx > 0 else 'L'}_{'B' if sy > 0 else 'F'}",
+                (post_t, post_t, h),
+                0.003,
+                wood_dark,
+                root,
+                (sx * (w * 0.5 - post_t * 0.5), sy * (d * 0.5 - post_t * 0.5), h * 0.5),
+                collection=collection,
+            )
+
+    # Side crossbars & slatted shelves on bottom (z=0.09m) and top (z=0.33m) tiers
+    for tier_name, tz in (("Bot", 0.09), ("Top", 0.33)):
+        for sx in (-1.0, 1.0):
+            _make_beveled_box(
+                f"ShoeRack_Side_{tier_name}_{'R' if sx > 0 else 'L'}",
+                (0.018, d - 0.02, 0.024),
+                0.002,
+                wood_dark,
+                root,
+                (sx * (w * 0.5 - post_t * 0.5), 0.0, tz),
+                collection=collection,
+            )
+        for idx, sy in enumerate((-0.09, -0.03, 0.03, 0.09)):
+            _make_beveled_box(
+                f"ShoeRack_Slat_{tier_name}_{idx}",
+                (w - 0.01, 0.044, 0.014),
+                0.002,
+                wood_mat,
+                root,
+                (0.0, sy, tz + 0.008),
+                collection=collection,
+            )
+
+    # 1 pair of stylized casual sneakers resting neatly on the bottom tier (z=0.105m)
+    for side_tag, sx, yaw_deg in (("L", -0.14, 174.0), ("R", 0.02, 184.0)):
+        sh_root = _make_empty(f"ShoeRack_Sneaker_{side_tag}", (sx, -0.01, 0.105), parent=root, collection=collection)
+        sh_root.rotation_euler = (0.0, 0.0, math.radians(yaw_deg))
+        # Cream vulcanized sole
+        _make_beveled_box(f"Sneaker_Sole_{side_tag}", (0.096, 0.245, 0.024), 0.008, shoe_sole, sh_root, (0.0, 0.0, 0.012), collection=collection)
+        # Main canvas body + rounded toe cap
+        _make_beveled_box(f"Sneaker_Body_{side_tag}", (0.088, 0.195, 0.052), 0.016, shoe_upper, sh_root, (0.0, -0.015, 0.046), collection=collection)
+        _make_beveled_box(f"Sneaker_Toe_{side_tag}", (0.084, 0.075, 0.036), 0.014, shoe_sole, sh_root, (0.0, 0.088, 0.034), collection=collection)
+        # Collar & tongue accents
+        _make_beveled_box(f"Sneaker_Collar_{side_tag}", (0.086, 0.085, 0.028), 0.010, shoe_upper, sh_root, (0.0, -0.068, 0.076), collection=collection)
+        for li, ly in enumerate((0.005, 0.028, 0.050)):
+            _make_beveled_box(f"Sneaker_Lace_{side_tag}_{li}", (0.048, 0.008, 0.005), 0.002, shoe_lace, sh_root, (0.0, ly, 0.073 - li * 0.004), collection=collection)
+
+    lx, ly, lz = location
+    return {
+        "root": root,
+        "top_z": lz + 0.346,
+        "slot_left": (lx - 0.15, ly - 0.01, lz + 0.346),
+        "slot_right": (lx + 0.02, ly - 0.01, lz + 0.346),
     }
 
 

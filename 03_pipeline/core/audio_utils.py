@@ -87,6 +87,54 @@ def _load_wav_mono_16k_float32(wav_path: Path) -> np.ndarray:
     return np.ascontiguousarray(data, dtype=np.float32)
 
 
+def _sanitize_whisper_words(
+    raw_words: List[Dict[str, Any]],
+    script_words: List[str],
+    raw_dur_sec: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Strip faster-whisper trailing silence hallucination loops (0-duration or repeated opening words)."""
+    if not raw_words:
+        return []
+
+    def _norm(tok: str) -> str:
+        return re.sub(r"[^a-z0-9]", "", tok.lower())
+
+    cleaned: List[Dict[str, Any]] = []
+    # 1. Drop trailing zero-duration hallucination tail (classic Whisper initial_prompt echo at EOF!)
+    end_idx = len(raw_words)
+    while end_idx > 1 and (float(raw_words[end_idx - 1]["end"]) - float(raw_words[end_idx - 1]["start"])) <= 0.015:
+        end_idx -= 1
+    trimmed = raw_words[:end_idx]
+
+    # 2. If Whisper echoed the start of the sentence after finishing it (e.g. "Maaf ya, bang. Dan kebetulan..."), cut the echo!
+    n_script = len(script_words)
+    if n_script >= 3 and len(trimmed) > n_script:
+        first_norm = _norm(script_words[0])
+        second_norm = _norm(script_words[1])
+        min_cut = max(3, int(n_script * 0.72))
+        for i in range(min_cut, len(trimmed)):
+            w_i = _norm(str(trimmed[i]["word"]))
+            w_next = _norm(str(trimmed[i + 1]["word"])) if (i + 1 < len(trimmed)) else ""
+            if w_i == first_norm and (not second_norm or w_next == second_norm or i >= n_script):
+                trimmed = trimmed[:i]
+                break
+        # Hard cap if extra hallucinated words remain after the exact last script word!
+        if len(trimmed) > n_script:
+            last_norm = _norm(script_words[-1])
+            for i in range(min_cut, min(len(trimmed), n_script + 2)):
+                if _norm(str(trimmed[i]["word"])) == last_norm:
+                    trimmed = trimmed[: i + 1]
+                    break
+
+    for w in trimmed:
+        t0 = max(0.0, float(w["start"]))
+        t1 = max(t0 + 0.03, float(w["end"]))
+        if raw_dur_sec and t0 > raw_dur_sec:
+            continue
+        cleaned.append({"word": str(w["word"]).strip(), "start": round(t0, 4), "end": round(t1, 4)})
+    return cleaned
+
+
 def extract_word_timestamps(
     wav_path: Path,
     vo_text: str,
@@ -98,18 +146,20 @@ def extract_word_timestamps(
 ) -> Optional[List[Dict[str, Any]]]:
     """Extract millisecond word timestamps from a scene WAV using `faster-whisper`.
 
-    Automatically verifies raw WAV duration vs `expected_dur_sec` and scales timestamps by
-    `1 / vo_speed` when FFmpeg applies `atempo=vo_speed` (e.g. `VO_SPEED = 1.08`), ensuring
-    zero drift between kinetic karaoke subtitles and tempo-adjusted voiceover!
+    Automatically verifies raw WAV duration vs `expected_dur_sec`, strips trailing silence
+    hallucinations, and scales timestamps by `1 / vo_speed` when FFmpeg applies `atempo=vo_speed`
+    (e.g. `VO_SPEED = 1.08`), ensuring zero drift between kinetic karaoke subtitles and voiceover!
     """
     cache_path = wav_path.with_suffix(".words.json")
     raw_words: Optional[List[Dict[str, Any]]] = None
+    script_words = [w for w in re.split(r"\s+", vo_text.replace("—", " — ").strip()) if w and w != "—"]
+    raw_dur = _probe_wav_duration_sec(wav_path)
 
     if use_cache and cache_path.exists():
         try:
             cached = json.loads(cache_path.read_text(encoding="utf-8"))
             if isinstance(cached, list) and cached:
-                raw_words = cached
+                raw_words = _sanitize_whisper_words(cached, script_words, raw_dur_sec=raw_dur)
         except Exception:
             raw_words = None
 
@@ -122,6 +172,7 @@ def extract_word_timestamps(
                 language=language,
                 word_timestamps=True,
                 vad_filter=True,
+                condition_on_previous_text=False,
                 initial_prompt=vo_text,
             )
             extracted: List[Dict[str, Any]] = []
@@ -136,6 +187,7 @@ def extract_word_timestamps(
                                 "end": round(float(w.end), 4),
                             }
                         )
+            extracted = _sanitize_whisper_words(extracted, script_words, raw_dur_sec=raw_dur)
             if extracted:
                 raw_words = extracted
                 cache_path.write_text(
@@ -151,7 +203,6 @@ def extract_word_timestamps(
 
     # Determine effective speed divisor: raw 1.0x WAV + FFmpeg atempo=vo_speed -> divide by vo_speed (1/VO_SPEED)!
     spd = max(0.5, float(vo_speed))
-    raw_dur = _probe_wav_duration_sec(wav_path)
     if raw_dur and expected_dur_sec and abs(spd - 1.0) > 1e-3:
         err_scaled = abs((raw_dur / spd) - expected_dur_sec)
         err_unscaled = abs(raw_dur - expected_dur_sec)
@@ -160,7 +211,6 @@ def extract_word_timestamps(
             spd = 1.0
 
     # Map clean script words onto Whisper word timestamps so spelling & punctuation match 100%!
-    script_words = [w for w in re.split(r"\s+", vo_text.replace("—", " — ").strip()) if w and w != "—"]
     adjusted: List[Dict[str, Any]] = []
     if len(script_words) == len(raw_words):
         for sw, rw in zip(script_words, raw_words):

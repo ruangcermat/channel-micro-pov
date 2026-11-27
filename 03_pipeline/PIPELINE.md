@@ -1,46 +1,60 @@
-# PIPELINE SOP — JADI APA 3D MICRO-POV STUDIO ENGINE (v2.0)
+# PIPELINE SOP — JADI APA 3D MICRO-POV STUDIO ENGINE (v3.0)
 
-Dokumen ini adalah SOP produksi modular **100% Cloud** untuk channel **Jadi Apa** (**Jadi Apa 3D**) dengan karakter maskot permanen **Mas Dimas** (`EP001–EP100+`). Lihat kitab teknis lengkap di [`MICRO_POV_STUDIO_SKILL.md`](MICRO_POV_STUDIO_SKILL.md).
+Dokumen ini adalah SOP produksi modular **100% Cloud** untuk channel **Jadi Apa** (**@jadiapa3d**) dengan karakter maskot permanen **Mas Dimas** (`EP001–EP100+`). Lihat kitab teknis lengkap di [`MICRO_POV_STUDIO_SKILL.md`](MICRO_POV_STUDIO_SKILL.md).
 
 ---
 
-## 1. Arsitektur Modular 3 Lapisan
+## 1. Arsitektur Modular 3 Lapisan & Unified Look-Dev
 1. **Universal Studio Core (`03_pipeline/core/`):**
-   - `camera_presets.py` (5 arketipe kamera POV: `insect_ground`, `aerial_erratic`, `fluid_float`, `static_object_pov`, `human_first_person` + beat modifiers + motion blur `shutter=0.40`)
-   - `mpfb_helpers.py` & `paint_mas_dimas_tex.py` (Master permanen **Mas Dimas v2.0**: kaus Crimson `#A62C2B` bertuliskan **`JADI APA`** + garis aksen kuning, **tanpa kacamata**, rambut bervolume, kulit hangat Asia Tenggara, celana pendek gelap, nyeker, Leg IK, `reach()`, `snap_sandal_to_foot()`, `snap_sandal_to_right_hand()`)
-   - `lighting_utils.py` (AgX Medium High Contrast, Cycles multi-GPU + OIDN, EEVEE auto-fallback, 2-Gate presets)
+   - `camera_presets.py` (5 arketipe kamera POV: `insect_ground`, `aerial_erratic`, `fluid_float`, `static_object_pov`, `human_first_person` + beat modifiers + motion blur `shutter=0.40` untuk render `final`)
+   - `mpfb_helpers.py` & `paint_mas_dimas_tex.py` (Master permanen **Mas Dimas v3.0 — Unified Stylized Semi-Matte**: kaus Crimson `#A62C2B` bertuliskan **`JADI APA`** + garis aksen kuning, **tanpa kacamata**, rambut hitam bervolume, kulit hangat Asia Tenggara & pakaian **`roughness 0.55–0.65`** *soft-matte* bersih tanpa pori-pori tajam, celana pendek gelap, **100% nyeker** di kosan, Leg IK, `reach()`, `snap_sandal_to_right_hand()`)
+   - `lighting_utils.py` (AgX Medium High Contrast, Cycles multi-GPU + OIDN, Adaptive Fast Storyboard `270×480` 4 samples)
    - `post.py` (`skills/blender-render-farm/scripts/post.py` soft lens + glow + vignette + film grain)
-   - `audio_utils.py` (`faster-whisper` word-level subtitle timestamps tersinkron `1 / VO_SPEED`, PyAV-free WAV decoder, micro-fade `15 ms`, dynamic `room_tone -32 dB`)
+   - `audio_utils.py` (`faster-whisper` word-level subtitle timestamps tersinkron `1 / VO_SPEED` + anti-hallucination filter + PyAV-free WAV decoder, micro-fade `15 ms`, dynamic `room_tone -32 dB`)
 2. **Generic Runners (`03_pipeline/scripts/`):**
-   - `build_and_render.py` memuat secara dinamis `04_episodes/<ep>/scene_builder.py` (produksi EP002+ mustahil merusak EP001!), mendukung `--frame-step` & `--max-frames` untuk uji cepat/smoke-test.
-   - `generate_tts.py`, `prepare_audio.py`, `compose_final.py`, `build_storyboard_sheet.py`, `fetch_assets.py`.
+   - `build_and_render.py` memuat secara dinamis `04_episodes/<ep>/scene_builder.py` (produksi EP002+ mustahil merusak EP001!).
+   - `build_storyboard_sheet.py` merakit **Adaptive Multi-Keyframe Fast Storyboard** (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, dst., maks. 8–9 panel/sheet + simulasi kotak subtitle ending).
+   - `generate_tts.py`, `prepare_audio.py`, `compose_final.py`, `fetch_assets.py`.
 3. **Isolated Episode Builder (`04_episodes/epXXX_<slug>/`):**
    - `epXXX_spec.json` + `scene_builder.py` khusus staging & koreografi episode tersebut.
 
----
-
-## 2. 2 HARD GATE PRODUKSI (WAJIB DIPATUHI)
-
-### HARD GATE 1 — STORYBOARD (`--mode storyboard`)
-- Render hero frames (`270×480` fast draft, 4 samples Cycles + OIDN + `post.py`, selesai < 60 detik) dan tampilkan **`storyboard_sheet.png`** (9 panel lengkap dengan kartu *Scene & Waktu*, *Aksi & Kamera*, *VO*, dan *SFX / BGM*).
-- **ATURAN KERAS:** **DILARANG** menyiapkan baking penuh 24fps atau menjalankan render Colab/Kaggle sebelum user membalas secara eksplisit: **`ACC STORYBOARD`**.
-
-### HARD GATE 2 — MOTION CHECK (`--mode motion_check`)
-- Hanya dijalankan **setelah** user memberi `ACC STORYBOARD`.
-- Merender full 24fps resolusi ringan (`360×640`, 8 samples, `EEVEE` dengan auto-fallback `Cycles` 8-sample jika headless Linux tidak mendukung EGL) lalu menyusun `motion_check_epXXX.mp4` lengkap dengan VO (`15 ms` micro-fade), SFX, `room_tone -32 dB`, BGM auto-ducking, dan subtitle `faster-whisper`.
-- Digunakan untuk verifikasi rasa gerak POV, timing komedi, dan safe-zone 9:16 sebelum masuk render **`final`** (`1080×1920`, 24fps, 24 samples di Kaggle GPU T4 x2 / Colab T4).
+### Unified Look-Dev (*Stylized Semi-Matte*) & Jangkar Semesta
+- **1 Bahasa Visual Tunggal:** Seluruh episode (manusia maupun non-manusia seperti Sel Darah Putih EP002 atau Kabel Charger EP003) WAJIB menggunakan permukaan *stylized semi-matte* (`roughness 0.55–0.65`) bertekstur halus (bukan bola polos mentah) dengan grading **`AgX Medium High Contrast` + `Macro DOF` + `post.py`**.
+- **Anchor Opening / Closing:** Episode dalam tubuh atau benda mati WAJIB dibuka 2 detik pertama (atau ditutup di ending) dengan **Mas Dimas** sebagai jangkar semesta sebelum/sesudah kamera masuk ke dunia mikro.
 
 ---
 
-## 3. Spesifikasi Output & Audio-First
-- **Resolusi:** `1080×1920` (9:16 final), `540×960` (preview), `360×640` (`motion_check`), `270×480` (fast draft `storyboard`).
-- **Frame Rate:** `24 fps` + `use_motion_blur = True` (`shutter = 0.40`) pada mode video GPU & `preview`/`final`.
-- **Audio:** Gemini 3.8 Flash TTS (`Puck`, `SKIP_EXISTING_VO=True`, `VO_SPEED=1.08`), micro-fade `15 ms` per clip WAV, `room_tone` dinamis `-32 dB`, SFX `-10 dB`, BGM `-22 dB` auto-ducking, master `-14 LUFS` (AAC 192 kbps, 48 kHz stereo).
-- **Subtitle `.ass`:** `PlayResX: 1080`, `PlayResY: 1920`, `MarginL/R: 95`, `MarginV: 380`, Bold `56pt`, `Outline=5`, 2–3 kata per chunk berbasis `faster-whisper` word-level timestamps (`1 / VO_SPEED`).
-- **Master Karakter Permanen:** `02_assets/models_3d/mas_dimas_ready.blend` (tersimpan di Google Drive & ikut dikemas di `epXXX_kaggle_bundle.zip`).
+## 2. Hybrid Production Pipeline (`render_pipeline` di `spec_schema.json`)
+Setiap episode atau scene memilih jalur produksi paling efisien melalui field `render_pipeline`:
+- **`blender_3d` *(Default)*:** Adegan POV bergerak di ruang 3D nyata (`insect_ground`, `aerial_erratic`, `fluid_float`, `human_first_person`, *whip-pan* 180°, perubahan FOV, *floor clamp*).
+- **`parallax_25d`:** Khusus adegan `static_object_pov` tenang yang tidak berpindah tempat (gambar statis digerakkan kode 2.5D agar hemat waktu/token).
+- **`ai_i2v`:** Khusus episode **Semesta Sejarah / Alam Ekstrem** berskala masif (mis. Krakatau 1883, tsunami, kerumunan besar) via Google Flow / Veo.
 
 ---
 
-## 4. Notebook Cloud 1-Click + Auto Error Logger (`error_report.txt`)
-1. **Google Colab (T4 GPU + Drive):** `03_pipeline/render_episode_colab.ipynb` — mendukung `storyboard`, `motion_check`, `preview`, `final`, revisi parsial `SINGLE_SCENE = N`, dan otomatis menulis **`error_report.txt`** ke Google Drive jika terjadi error.
-2. **Kaggle GPU T4 x2 (Unattended Commit — 1-File Upload):** `03_pipeline/render_episode_kaggle.ipynb` — cukup upload 1 arsip **`epXXX_kaggle_bundle.zip`** (berisi `mas_dimas_ready.blend`, `timing_manifest.json`, `raw_render/vo/scene_*.wav` + `.words.json`), otomatis ekstrak, render 2×T4 + auto-resume (`>10 KB`) + `post.py` + `compose_final.py`, ekspor `final_epXXX.mp4` ke `/kaggle/working/`, dan otomatis simpan **`/kaggle/working/error_report.txt`** jika terjadi error runtime.
+## 3. Adaptive Multi-Keyframe Fast Storyboard Gate (Pengganti Video `motion_check`)
+Mulai `EP001` dan seluruh episode selanjutnya (`EP002–EP100+`), pengecekan gerak & komposisi sebelum render `final` **TIDAK lagi merender video `motion_check`**, melainkan memakai **Adaptive Multi-Keyframe Fast Storyboard**:
+
+1. **HARD GATE — ADAPTIVE MULTI-KEYFRAME FAST STORYBOARD (`--mode storyboard`):**
+   - Resolusi **`270×480`** per panel, **`4 samples + OIDN`**, `use_persistent_data=True`, *motion blur* OFF → selesai dalam **~1–2 menit**.
+   - **Jumlah panel & sheet adaptif (tidak dibatasi kaku 1 atau 2 sheet):** Render sebanyak yang diperlukan, dikelompokkan rapi maksimal **8–9 panel per sheet** (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, dst.) sehingga **setiap transisi gerakan penting** (masuk pintu, tekan saklar, tangan meraih properti dari titik statis, *bullet-time*, langkah kaki, awal/tengah/akhir *whip-pan*, ekspresi wajah, hingga **overlay simulasi kotak subtitle ending**) terlihat jelas.
+   - Agen WAJIB melakukan **Self-QC Vision** pada seluruh panel sebelum menampilkan ke user.
+   - **ATURAN KERAS:** **DILARANG** menyiapkan bundle Kaggle, merender video `motion_check`, atau menjalankan render Colab/Kaggle sebelum user membalas secara eksplisit: **`ACC STORYBOARD`**.
+2. **FINAL PRODUCTION RENDER (`--mode final` — Hanya Setelah `ACC STORYBOARD`):**
+   - Full `1080×1920`, `24 fps`, `24 samples + OIDN`, `use_motion_blur = True` (`shutter = 0.40`), `post.py`, dan `compose_final.py` (`-14 LUFS`, `faster-whisper` `1 / VO_SPEED`).
+
+---
+
+## 4. Hukum "Anti-Senam Tulang"
+- **DILARANG** membuat koreografi tubuh rumit melepas alas kaki atau pakaian dari rig tubuh yang sedang bergerak.
+- Untuk pengambilan properti (sandal, HP, alat dapur), selalu gunakan **titik ambil statis** (rak sandal, meja, nakas) atau pose *upper-body* + ekspresi wajah ARKit (`BOOST 1.6`).
+
+---
+
+## 5. Spesifikasi Output, Audio-First & Cloud Notebooks
+- **Resolusi:** `1080×1920` (9:16 final), `540×960` (preview opsional), `270×480` (Adaptive Multi-Keyframe Fast Storyboard).
+- **Audio:** Gemini 3.8 Flash TTS (`Puck`, `SKIP_EXISTING_VO=True`, `VO_SPEED=1.08`), micro-fade `15 ms` per clip WAV, `room_tone` dinamis `-32 dB`, SFX `-10 dB` (dengan kontrol gain per-SFX seperti `skitter_fast` `-7 dB` di bawah VO), BGM `-22 dB` auto-ducking, master `-14 LUFS` (AAC 192 kbps, 48 kHz stereo).
+- **Subtitle `.ass`:** `PlayResX: 1080`, `PlayResY: 1920`, `MarginL/R: 95`, `MarginV: 380`, Bold `56pt`, `Outline=5`, 2–3 kata per chunk berbasis `faster-whisper` word-level timestamps (`1 / VO_SPEED`, anti-hallucination tail filter, dan anti-spoiler badge pada punchline ending).
+- **Notebook Cloud 1-Click + Auto Error Logger (`error_report.txt`):**
+  - Google Colab: `03_pipeline/render_episode_colab.ipynb`
+  - Kaggle GPU T4 x2 (1-File Bundle): `03_pipeline/render_episode_kaggle.ipynb`
