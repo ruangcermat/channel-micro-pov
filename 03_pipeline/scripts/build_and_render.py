@@ -7,13 +7,15 @@ producing EP002–EP100+ can NEVER break EP001.
 Usage (Blender 5.2.2 Linux headless):
   blender --background --python 03_pipeline/scripts/build_and_render.py -- \\
       --spec 04_episodes/ep001_kecoak_dapur/ep001_spec.json \\
-      --mode storyboard --engine CYCLES [--scene 4] [--save-blend]
+      --mode final --engine CYCLES_FAST --frames-dir /tmp/render_frames/ep001_kecoak_dapur
 
-2-Hard-Gate Modes:
-- `storyboard`   (Gate 1): Fast hero frames (450x800, 12 samples, post.py) -> `storyboard_sheet.png`
-- `motion_check` (Gate 2): Full 24fps (360x640, 8 samples, EEVEE w/ Cycles fallback, motion blur ON)
-- `preview`              : Full 24fps (540x960, 16 samples, motion blur ON)
-- `final`                : Full 24fps (1080x1920, 24 samples, motion blur ON, Kaggle 2xT4 / Colab T4)
+Production Modes:
+- `storyboard`   (Gate 1): Fast hero frames (270x480, 4 samples, post.py) -> `storyboard_sheet_*.png`
+- `motion_check` (Legacy): Full 24fps (360x640, 8 samples, EEVEE w/ Cycles fallback)
+- `preview`              : Full 24fps (540x960, 10 samples, FFmpeg post-look)
+- `final`                : Full 24fps (1080x1920, Cycles Fast OptiX 10 samples + adaptive 0.05 +
+                           volume_bounces=0 + persistent data, or EEVEE < 5 min; PNGs rendered strictly
+                           to local `--frames-dir /tmp/render_frames/`, FFmpeg post-look in compose_final.py)
 """
 
 from __future__ import annotations
@@ -167,7 +169,7 @@ def run_qc_checks(
 
 
 # =============================================================================
-# RESILIENT FRAME RENDERER (OPTIX -> CUDA -> CPU FALLBACK + AUTO-RESUME + post.py)
+# RESILIENT FRAME RENDERER (OPTIX -> OIDN -> CUDA -> CPU FALLBACK + AUTO-RESUME)
 # =============================================================================
 
 def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: Path, apply_post: bool) -> float:
@@ -179,34 +181,57 @@ def _render_single_frame_resilient(scene: bpy.types.Scene, frame: int, out_png: 
     except Exception as exc:
         log("WARN", f"Frame {frame} render failed ({exc}); trying fallback backend...")
         if scene.render.engine == "CYCLES":
-            prefs = bpy.context.preferences.addons["cycles"].preferences
-            for backend in ("CUDA", None):
+            # Stage 1: If OPTIX denoiser failed on a specific T4 driver, keep fast OPTIX GPU raytracing & switch denoiser -> OIDN!
+            recovered = False
+            if getattr(scene.cycles, "denoiser", "") == "OPTIX":
                 try:
-                    if backend:
-                        prefs.compute_device_type = backend
-                        prefs.refresh_devices()
-                        for d in prefs.devices:
-                            d.use = d.type == backend
-                        scene.cycles.device = "GPU"
-                    else:
-                        scene.cycles.device = "CPU"
+                    scene.cycles.denoiser = "OPENIMAGEDENOISE"
                     try:
-                        scene.cycles.denoising_use_gpu = False
+                        scene.cycles.denoising_use_gpu = scene.cycles.device == "GPU"
                     except Exception:
                         pass
                     bpy.ops.render.render(write_still=True)
-                    log("RENDER", f"Recovered frame {frame} via {backend or 'CPU'}")
-                    break
+                    log("RENDER", f"Recovered frame {frame} via OPTIX GPU + OPENIMAGEDENOISE fallback")
+                    recovered = True
                 except Exception:
-                    continue
-            else:
+                    pass
+
+            if not recovered:
+                prefs = bpy.context.preferences.addons["cycles"].preferences
+                scene.cycles.denoiser = "OPENIMAGEDENOISE"
+                for backend in ("CUDA", None):
+                    try:
+                        if backend:
+                            prefs.compute_device_type = backend
+                            prefs.refresh_devices()
+                            for d in prefs.devices:
+                                d.use = d.type == backend
+                            scene.cycles.device = "GPU"
+                        else:
+                            scene.cycles.device = "CPU"
+                        try:
+                            scene.cycles.denoising_use_gpu = False
+                        except Exception:
+                            pass
+                        bpy.ops.render.render(write_still=True)
+                        log("RENDER", f"Recovered frame {frame} via {backend or 'CPU'} + OIDN")
+                        recovered = True
+                        break
+                    except Exception:
+                        continue
+            if not recovered:
                 raise
         else:
-            scene.render.engine = "CYCLES"
-            scene.cycles.device = "CPU"
-            scene.cycles.samples = 8
+            # EEVEE failed on headless Linux (missing EGL context) -> fall back to Cycles Fast GPU (OPTIX/CUDA) then CPU!
+            lgt_lib.configure_render_engine(scene, "CYCLES_FAST", "final", fps=scene.render.fps, log_fn=log)
             scene.cycles.denoiser = "OPENIMAGEDENOISE"
-            bpy.ops.render.render(write_still=True)
+            try:
+                bpy.ops.render.render(write_still=True)
+                log("RENDER", f"Recovered frame {frame} via Cycles Fast ({scene.cycles.device}) fallback from EEVEE")
+            except Exception:
+                scene.cycles.device = "CPU"
+                bpy.ops.render.render(write_still=True)
+                log("RENDER", f"Recovered frame {frame} via Cycles CPU fallback from EEVEE")
 
     if apply_post and out_png.exists():
         post_lib.apply_camera_look(out_png, out_png, seed=7 + frame)
@@ -530,6 +555,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
     parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets cache directory")
     parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
+    parser.add_argument(
+        "--frames-dir",
+        type=str,
+        default=None,
+        help="Fast local disk directory (e.g. /tmp/render_frames/ep001) for raw PNG frames & scene MP4s (NEVER write PNGs to Google Drive!)",
+    )
     parser.add_argument("--mas-dimas-blend", type=str, default=None, help="Override path to mas_dimas_ready.blend")
     parser.add_argument("--family-blend", type=str, default=None, help="Override fallback path to family_ready.blend")
     parser.add_argument(
@@ -537,11 +568,20 @@ def parse_args() -> argparse.Namespace:
         choices=["storyboard", "motion_check", "preview", "final"],
         default="storyboard",
     )
-    parser.add_argument("--engine", choices=["CYCLES", "EEVEE", "AUTO"], default="CYCLES")
+    parser.add_argument(
+        "--engine",
+        choices=["CYCLES_FAST", "CYCLES", "EEVEE", "AUTO"],
+        default="CYCLES_FAST",
+    )
     parser.add_argument("--scene", type=int, default=None, help="Render ONLY a single scene_id")
     parser.add_argument("--save-blend", action="store_true", help="Pack & save assembled .blend file")
     parser.add_argument("--bake-all", action="store_true", help="Force full frame-by-frame bake even in storyboard mode")
-    parser.add_argument("--no-post", action="store_true", help="Disable post.py camera look pass")
+    parser.add_argument("--no-post", action="store_true", help="Disable post.py camera look pass even on storyboard")
+    parser.add_argument(
+        "--cpu-post",
+        action="store_true",
+        help="Force legacy per-frame CPU post.py on video modes (default OFF: FFmpeg applies vignette/grade/grain in ~5s!)",
+    )
     parser.add_argument("--no-render", action="store_true", help="Build & QC .blend scene only without rendering")
     parser.add_argument("--build-mas-dimas", action="store_true", help="Rebuild mas_dimas_ready.blend & front check PNG")
     parser.add_argument(
@@ -560,7 +600,7 @@ def parse_args() -> argparse.Namespace:
         "--samples",
         type=int,
         default=0,
-        help="Optional Cycles sample override (0 = use mode preset: 4 storyboard, 8 motion_check, 16 preview, 24 final)",
+        help="Optional Cycles sample override (0 = use mode preset: 4 storyboard, 8 motion_check, 10 preview/final)",
     )
     return parser.parse_args(extra)
 
@@ -690,10 +730,19 @@ def main() -> int:
         log("BLENDER", "--no-render active; scene assembly & QC verified cleanly.")
         return 0
 
-    scenes_out_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
+    frames_root_arg = args.frames_dir or os.environ.get("MICRO_POV_FRAMES_DIR")
+    if frames_root_arg:
+        scenes_out_dir = Path(frames_root_arg).resolve() / f"scenes_{args.mode}"
+        log("STORAGE", f"Fast Local Disk active (ZERO PNGs to Drive): {scenes_out_dir}")
+    else:
+        scenes_out_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
     scenes_out_dir.mkdir(parents=True, exist_ok=True)
-    # Gate 2 motion_check skips heavy post.py by default for max speed unless final/preview/storyboard
-    apply_post = (not args.no_post) and (args.mode != "motion_check")
+
+    # Fast Local Render Rule: skip slow per-frame CPU post.py on video modes (final/preview/motion_check)!
+    # FFmpeg applies cinematic color grade + vignette + film grain in ~5s for the entire video in compose_final.py.
+    apply_post = (not args.no_post) and (args.mode == "storyboard" or args.cpu_post)
+    if args.mode != "storyboard" and not apply_post:
+        log("POST", "Per-frame CPU post.py SKIPPED for video speed — FFmpeg post-look will run in compose_final.py (~5s).")
 
     if args.mode == "storyboard" and adaptive_kfs is not None:
         render_adaptive_storyboard_keyframes(scene, adaptive_kfs, scenes_out_dir, apply_post=apply_post)

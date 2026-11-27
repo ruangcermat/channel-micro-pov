@@ -72,8 +72,10 @@ DILARANG menaruh logika spesifik satu episode (mis. dapur kecoak, lambung, jalan
    - Resolusi **`270×480`** per panel, **`4 samples + OIDN`**, `use_persistent_data=True`, `use_motion_blur=False` → selesai **~1–2 menit**.
    - **Jumlah panel & sheet adaptif (tidak dibatasi kaku):** Render sebanyak keyframe yang dibutuhkan, dibagi rapi maksimal **8–9 panel per sheet** (`storyboard_sheet_1.png`, `storyboard_sheet_2.png`, dst.) agar **seluruh transisi penting** (masuk ruangan, tekan saklar, tangan meraih properti dari rak/meja, *bullet-time*, langkah kaki, *whip-pan* kiri/kanan/atas, terbang, hingga **simulasi kotak subtitle ending**) bisa diaudit sebelum render final.
    - Agen **WAJIB Self-QC Vision** terhadap seluruh panel sebelum menampilkan ke user, lalu **STOP TOTAL** menunggu balasan **`ACC STORYBOARD`**.
-2. **FINAL RENDER (`--mode final` — Hanya Setelah `ACC STORYBOARD`):**
-   - Barulah siapkan bundle Kaggle / Colab dan jalankan render **`final`** (`1080×1920`, `24 fps`, `24 samples + OIDN`, `use_motion_blur=True`, `post.py`) + `compose_final.py` (`-14 LUFS`, `faster-whisper` `1 / VO_SPEED`).
+2. **FAST LOCAL FINAL RENDER (`--mode final` — Hanya Setelah `ACC STORYBOARD`):**
+   - **Wajib Disk Lokal Cepat (`--frames-dir /tmp/render_frames/<ep>`):** DILARANG menulis 1.161+ PNG mentah ke Google Drive! Setelah `compose_final.py` menyalin **HANYA 1 file `final_epXXX.mp4`** (~15–25 MB) ke Google Drive, `--cleanup-frames` otomatis menghapus seluruh PNG di `/tmp/render_frames/`.
+   - **Engine Utama (`CYCLES_FAST`, default Colab):** `1080×1920`, `24 fps`, `OPTIX` (fallback `CUDA`), **`10 samples`**, `adaptive_threshold=0.05`, `OPTIX` denoiser (runtime fallback `OIDN`), `max_bounces=4` (`diffuse=2, glossy=2, transmission=2, volume=0`), `use_persistent_data=True`, `use_motion_blur=True` (`shutter=0.40`) → **~1–1,5 detik/frame (~18–25 menit di Colab T4)**. Tersedia juga toggle **`EEVEE`** (`16 samples`, < 5 menit).
+   - **FFmpeg Post-Look (Skip CPU `post.py` di Mode Video):** Efek *color grade + vignette + grain* dijalankan langsung di filter **FFmpeg** (`compose_final.py`, selesai ~5 detik sebelum burn-in subtitle `.ass`) sehingga tidak memakan waktu 1.161× Python CPU.
 
 ---
 
@@ -84,4 +86,4 @@ DILARANG menaruh logika spesifik satu episode (mis. dapur kecoak, lambung, jalan
   - [ ] Jangan pernah zero `$md-*` body shape keys (hanya `!ex-*` + `BOOST=1.6` + tulang `jaw`).
   - [ ] `shoulder01.L/R` WAJIB masuk `POSE_BONES` agar selalu di-reset & di-keyframe setiap frame.
   - [ ] Pertahankan `Hide helpers` MASK di `Kid_body`; hapus hanya `Delete.*` agar kaki nyeker utuh.
-  - [ ] Selalu `Displace 0.006`, `fix_teeth.py`, `pack_all()`, `MISSING=[]`, `shoes=0`, `camera_clear=ALL`, dan denoiser `OPENIMAGEDENOISE`.
+  - [ ] Selalu `Displace 0.006`, `fix_teeth.py`, `pack_all()`, `MISSING=[]`, `shoes=0`, `camera_clear=ALL`, serta **Fast Local Disk `/tmp/render_frames/`** + `OPTIX` denoiser dengan auto-fallback `OPENIMAGEDENOISE`.

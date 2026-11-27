@@ -20,7 +20,9 @@ Responsibilities:
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -350,8 +352,9 @@ def mix_audio_and_compose(
     output_mp4: Path,
     ffmpeg_bin: str,
     work_dir: Optional[Path] = None,
+    apply_ffmpeg_post: bool = True,
 ) -> Path:
-    """Mix VO (-6 dB) + SFX (-10 dB) + auto-ducked BGM (-22 dB) + -14 LUFS + burn ASS subtitles."""
+    """Mix VO (-6 dB) + SFX (-10 dB) + auto-ducked BGM (-22 dB) + -14 LUFS + FFmpeg post-look + burn ASS subtitles."""
     total_dur = float(manifest["total_duration_sec"])
     scene_map: Dict[int, Dict[str, Any]] = {int(s["scene_id"]): s for s in manifest["scenes"]}
     spec_scene_map: Dict[int, Dict[str, Any]] = {int(s["scene_id"]): s for s in spec["scenes"]}
@@ -522,9 +525,17 @@ def mix_audio_and_compose(
         f"atrim=0:{total_dur:.4f},loudnorm=I=-14:TP=-1.5:LRA=11[a_master]"
     )
 
-    # 6. VIDEO BURN-IN SUBTITLES (.ass)
+    # 6. FAST FFMPEG CINEMATIC POST-LOOK (Color Grade + Vignette + Subtle Grain) + BURN-IN SUBTITLES (.ass)
+    # Applied BEFORE ass= so subtitles stay 100% razor-sharp and bright white/yellow!
     ass_escaped = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-    filter_parts.append(f"[0:v]ass='{ass_escaped}'[v_sub]")
+    if apply_ffmpeg_post:
+        filter_parts.append(
+            f"[0:v]eq=contrast=1.04:saturation=1.06:gamma=0.98,"
+            f"vignette=angle=PI/5.2:mode=backward,"
+            f"noise=alls=3:allf=t+u,ass='{ass_escaped}'[v_sub]"
+        )
+    else:
+        filter_parts.append(f"[0:v]ass='{ass_escaped}'[v_sub]")
 
     filter_complex = ";\n".join(filter_parts)
 
@@ -546,7 +557,7 @@ def mix_audio_and_compose(
         "-crf",
         "18",
         "-preset",
-        "medium",
+        "fast",
         "-movflags",
         "+faststart",
         "-c:a",
@@ -562,7 +573,12 @@ def mix_audio_and_compose(
         str(output_mp4),
     ]
 
-    log("COMPOSE", f"Mixing VO (15ms fade) + {sfx_counter} SFX + {bgm_counter} BGM + room_tone ({rt_id} {rt_db:.0f}dB) + ASS -> {output_mp4}...")
+    post_tag = "FFmpeg Post-Look (grade+vignette+grain)" if apply_ffmpeg_post else "Post-Look OFF"
+    log(
+        "COMPOSE",
+        f"Mixing VO (15ms fade) + {sfx_counter} SFX + {bgm_counter} BGM + room_tone ({rt_id} {rt_db:.0f}dB) "
+        f"+ {post_tag} + ASS -> {output_mp4}...",
+    )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         log("ERROR", f"FFmpeg failed:\n{proc.stderr[-2500:]}")
@@ -571,6 +587,17 @@ def mix_audio_and_compose(
     size_mb = output_mp4.stat().st_size / (1024 * 1024)
     log("COMPOSE", f"SUCCESS! Exported {output_mp4} ({size_mb:.2f} MB, {total_dur:.2f}s, -14 LUFS)")
     return output_mp4
+
+
+def _dir_size_mb(path: Path) -> float:
+    total = 0
+    for p in path.rglob("*"):
+        if p.is_file():
+            try:
+                total += p.stat().st_size
+            except OSError:
+                pass
+    return total / (1024 * 1024)
 
 
 def main() -> int:
@@ -585,6 +612,22 @@ def main() -> int:
     parser.add_argument("--timing", type=str, default=None, help="Path to timing_manifest.json")
     parser.add_argument("--assets-dir", type=str, default=None, help="Override 02_assets directory")
     parser.add_argument("--work-dir", type=str, default=None, help="Override episode working directory")
+    parser.add_argument(
+        "--frames-dir",
+        type=str,
+        default=None,
+        help="Fast local disk directory (e.g. /tmp/render_frames/ep001) holding raw PNGs & scene MP4s",
+    )
+    parser.add_argument(
+        "--cleanup-frames",
+        action="store_true",
+        help="Auto-delete --frames-dir (all raw PNGs & temp files) immediately after final MP4 is exported!",
+    )
+    parser.add_argument(
+        "--no-ffmpeg-post",
+        action="store_true",
+        help="Disable FFmpeg fast post-look (color grade + vignette + subtle film grain)",
+    )
     parser.add_argument("--mode", choices=["storyboard", "motion_check", "preview", "final"], default="final")
     parser.add_argument("--output", type=str, default=None, help="Override final output .mp4 path")
     parser.add_argument("--no-whisper", action="store_true", help="Disable faster-whisper word timestamps")
@@ -607,7 +650,17 @@ def main() -> int:
         return 1
     manifest = load_json(timing_path)
 
-    scenes_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
+    frames_root_arg = args.frames_dir or os.environ.get("MICRO_POV_FRAMES_DIR")
+    frames_root = Path(frames_root_arg).resolve() if frames_root_arg else None
+    if frames_root is not None:
+        scenes_dir = frames_root / f"scenes_{args.mode}"
+        concat_mp4 = frames_root / f"concat_{args.mode}.mp4"
+        ass_path = frames_root / f"subtitles_{args.mode}.ass"
+        log("STORAGE", f"Reading local rendered clips from fast disk: {scenes_dir}")
+    else:
+        scenes_dir = work_dir / "raw_render" / f"scenes_{args.mode}"
+        concat_mp4 = work_dir / "raw_render" / f"concat_{args.mode}.mp4"
+        ass_path = work_dir / f"subtitles_{args.mode}.ass"
     scenes_dir.mkdir(parents=True, exist_ok=True)
 
     if args.dry_run_video:
@@ -646,11 +699,9 @@ def main() -> int:
             )
         log("COMPOSE", f"[DRY-RUN] Generated {len(manifest['scenes'])} placeholder scene MP4 clips ({w}x{h})")
 
-    concat_mp4 = work_dir / "raw_render" / f"concat_{args.mode}.mp4"
     concatenate_scene_videos(manifest, scenes_dir, concat_mp4, ffmpeg_bin)
 
     w, h = probe_video_resolution(concat_mp4)
-    ass_path = work_dir / f"subtitles_{args.mode}.ass"
     generate_ass_subtitles(
         manifest,
         ass_path,
@@ -671,16 +722,44 @@ def main() -> int:
         default_out_name = f"preview_{ep_slug}.mp4"
     output_mp4 = Path(args.output).resolve() if args.output else (work_dir / default_out_name)
 
+    # Encode on fast local disk first when --frames-dir is active, then copy ONLY final .mp4 to Google Drive!
+    stage_mp4 = (frames_root / output_mp4.name) if (frames_root is not None and frames_root != output_mp4.parent) else output_mp4
+    apply_ffmpeg_post = (not args.no_ffmpeg_post) and (args.mode != "storyboard")
+
     mix_audio_and_compose(
         spec,
         manifest,
         concat_mp4,
         ass_path,
         assets_dir,
-        output_mp4,
+        stage_mp4,
         ffmpeg_bin,
         work_dir=work_dir,
+        apply_ffmpeg_post=apply_ffmpeg_post,
     )
+
+    if stage_mp4 != output_mp4:
+        output_mp4.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(stage_mp4, output_mp4)
+        log(
+            "EXPORT",
+            f"Copied ONLY final MP4 to permanent storage ({output_mp4.stat().st_size / (1024 * 1024):.2f} MB) -> {output_mp4}",
+        )
+
+    if args.cleanup_frames and frames_root is not None:
+        # Strict safety guard: never delete work_dir or root filesystem!
+        if frames_root != work_dir and work_dir not in frames_root.parents and len(frames_root.parts) >= 3:
+            if output_mp4.exists() and output_mp4.stat().st_size > 10_000 and frames_root.exists():
+                freed_mb = _dir_size_mb(frames_root)
+                shutil.rmtree(frames_root)
+                log(
+                    "CLEANUP",
+                    f"Auto-deleted local temp PNGs & intermediates: {frames_root} (freed {freed_mb:.1f} MB) | "
+                    f"Drive stays 100% clean!",
+                )
+        else:
+            log("WARN", f"Skipped --cleanup-frames safety guard for path: {frames_root}")
+
     return 0
 
 

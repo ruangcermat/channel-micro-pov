@@ -36,6 +36,12 @@ File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setia
    - **Anti-Spoiler Badge:** Jangan tampilkan badge teks punchline ending sejak awal scene terakhir; tunda hingga detik punchline (mis. `00:45.5`) atau kosongkan badge atas scene terakhir.
    - Pastikan SFX kontinyu bernada ramai (seperti `skitter_fast`) diturunkan sekitar **`-7 dB` di bawah VO** agar narasi cepat tetap 100% jernih.
 
+7. **Fast Local Render — Cycles OptiX 10 Samples + FFmpeg Post + Auto-Delete `/tmp/` PNG (DILARANG Menulis PNG ke Drive):**
+   - Render Cycles 24 samples + per-frame CPU `post.py` sambil menulis 1.161+ PNG langsung ke FUSE Google Drive memakan ~10 detik/frame (~3 jam/video) dan mengotori Google Drive.
+   - **WAJIB Disk Lokal Cepat:** Semua PNG mentah & video scene sementara WAJIB dirender ke **`--frames-dir /tmp/render_frames/<ep>`** (SSD lokal). Setelah `compose_final.py` menyalin **HANYA 1 file `final_epXXX.mp4`** (~15–25 MB) ke Google Drive `04_episodes/epXXX_.../`, flag `--cleanup-frames` **otomatis menghapus** seluruh isi `/tmp/render_frames/`.
+   - **Preset Utama (`CYCLES_FAST`, default Colab):** `CYCLES` device `OPTIX` (fallback `CUDA`), **`samples = 10`**, `use_adaptive_sampling = True` (`adaptive_threshold = 0.05`), `use_denoising = True` (`OPTIX` denoiser dengan auto-fallback runtime ke `OPENIMAGEDENOISE`), `max_bounces = 4` (`diffuse=2, glossy=2, transmission=2, volume=0`), `use_persistent_data = True` → **~1–1,5 detik/frame (~18–25 menit di Colab T4)**. Tersedia pula toggle **`RENDER_ENGINE = "EEVEE"`** di Form Sel 1 Colab untuk render < 5 menit.
+   - **FFmpeg Post-Look (~5 Detik vs 1.161× Python CPU):** Pada mode video (`final`/`preview`), `post.py` CPU per-frame dilewati otomatis; efek ringan *color grade (`eq`), vignette, dan film grain (`noise`)* diterapkan langsung di filter **FFmpeg** tepat sebelum burn-in subtitle `.ass`.
+
 ---
 
 ## Siklus Audit Performa: Menunggu Batch 1 (`EP001–EP005`)
