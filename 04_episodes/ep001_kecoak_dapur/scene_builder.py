@@ -676,11 +676,11 @@ def build_episode_scene(
 
     bpy.context.preferences.edit.keyframe_new_interpolation_type = "CONSTANT" if bake_frames is None else "LINEAR"
 
-    # 1. Build kitchen room, lighting, low wooden shoe rack under 02:00 clock & 30 Poly Haven CC0 props
+    # 1. Build kitchen room, lighting & low wooden shoe rack under 02:00 clock
+    #    (30 Poly Haven GLTF props are imported AFTER baking so view_layer.update() stays fast across 1,153+ frames!)
     env = props.build_kitchen_tile_floor(assets_dir)
     door_pivot = env["door_pivot"]
     lights = setup_world_and_lights(scene, assets_dir)
-    populate_dense_kosan_kitchen(assets_dir)
     shoe_rack = props.build_kosan_shoe_rack((1.04, 3.36, 0.0))
 
     # 2. Build stylized Indonesian props + PAIR of green Swallow flip-flops on the wooden shoe rack!
@@ -1580,9 +1580,10 @@ def build_episode_scene(
         lights["world_bg"].inputs["Strength"].default_value = w_strength
         lights["world_bg"].inputs["Strength"].keyframe_insert("default_value", frame=fr)
 
-        if (idx_f + 1) % 240 == 0:
+        if (idx_f + 1) % 50 == 0 or (idx_f + 1) == len(frames_to_bake):
             log("EP001", f"Baked {idx_f + 1}/{len(frames_to_bake)} frames ({_time.monotonic() - t_bake:.1f}s)")
 
+    populate_dense_kosan_kitchen(assets_dir)
     scene.frame_start = 1
     scene.frame_end = total_frames
     log("EP001", f"Finished baking {len(frames_to_bake)} frames in {_time.monotonic() - t_bake:.1f}s")
