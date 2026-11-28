@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Mobile-First v4.0 Audio-First Voiceover, Timing Manifest & Subtitle Generator (`Jadi Apa`).
+"""Mobile-First v4.2 Audio-First Voiceover, Timing Manifest & Subtitle Generator (`Jadi Apa`).
 
 Reads `04_episodes/<ep_id>/<ep_id>_vo_spec.json`, synthesizes Indonesian voiceover via
-`gemini-3.8-flash-tts` (`Puck`, with acting/style directions strictly isolated in
+`gemini-3.8-flash-tts` (`Fenrir`, with acting/style directions strictly isolated in
 `speech_metadata` — NEVER concatenated into `vo_text`), stitches a unified `vo_master.wav`,
 runs `faster-whisper` (`condition_on_previous_text=False`, anti-zero-duration tail filter)
 to generate:
@@ -11,7 +11,7 @@ to generate:
                                   Omni Flash 1.2 clip length rounded UP into `3..10` seconds
   3. `subtitles.ass`            — kinetic 9:16 bottom karaoke subtitles (ZERO top yellow badges!)
 
-Finally syncs all 3 outputs directly to Google Drive `04_episodes/<ep_id>/` and ensures the
+Finally syncs all outputs directly to Google Drive `04_episodes/<ep_id>/` and ensures the
 `raw_clips/` subfolder exists so the user can upload `shot_01.mp4 .. shot_NN.mp4` from mobile.
 
 Usage:
@@ -51,7 +51,7 @@ from core.audio_utils import (  # noqa: E402
 
 DEFAULT_PRIMARY_MODEL = "gemini-3.8-flash-tts"
 DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash-lite-tts"
-DEFAULT_VOICE = "Puck"
+DEFAULT_VOICE = "Fenrir"
 DEFAULT_VO_SPEED = 1.08
 DEFAULT_PAD_SEC = 0.06
 DEFAULT_SAMPLE_RATE = 24000
@@ -338,8 +338,9 @@ def _stylize_karaoke_chunk(chunk: str, chunk_idx: int) -> str:
 
 def write_clean_karaoke_ass(manifest: Dict[str, Any], out_ass: Path) -> Path:
     """Write 1080x1920 bottom-only kinetic karaoke `.ass` subtitles (ZERO top yellow badges!)."""
+    margin_v = int(manifest.get("subtitle_margin_v") or 380)
     header = f"""[Script Info]
-Title: {manifest.get('episode_id', 'EP')} Mobile-First v4.0 Subtitles
+Title: {manifest.get('episode_id', 'EP')} Mobile-First v4.2 Subtitles
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
@@ -348,7 +349,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: MainSub,DejaVu Sans,56,&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,5,2,2,95,95,380,1
+Style: MainSub,DejaVu Sans,56,&H00FFFFFF,&H0000EAFF,&H00000000,&H96000000,-1,0,0,0,100,100,1,0,1,5,2,2,95,95,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -501,16 +502,16 @@ def concat_master_wav(seg_wavs: List[Path], out_master_wav: Path, ffmpeg_bin: st
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mobile-First v4.0 Audio-First VO (`gemini-3.8-flash-tts`) + `faster-whisper` Timing Manifest + Karaoke ASS."
+        description="Mobile-First v4.2 Audio-First VO (`gemini-3.8-flash-tts`) + `faster-whisper` Timing Manifest + Karaoke ASS."
     )
     parser.add_argument("--ep", type=str, default=None, help="Episode slug (e.g. ep001_kecoak_dapur)")
     parser.add_argument("--spec", type=str, default=None, help="Explicit path to <ep_id>_vo_spec.json")
     parser.add_argument("--out-dir", type=str, default=None, help="Local output directory (default /tmp/flow_v4_vo/<ep>)")
-    parser.add_argument("--voice", type=str, default=None, help="Gemini TTS voice override (default Puck)")
+    parser.add_argument("--voice", type=str, default=None, help="Gemini TTS voice override (default Fenrir)")
     parser.add_argument("--vo-speed", type=float, default=None, help="VO playback speed override (default 1.08)")
     parser.add_argument("--pad-sec", type=float, default=DEFAULT_PAD_SEC, help="Default trailing pause per segment (s)")
-    parser.add_argument("--primary-model", type=str, default=DEFAULT_PRIMARY_MODEL)
-    parser.add_argument("--fallback-model", type=str, default=DEFAULT_FALLBACK_MODEL)
+    parser.add_argument("--primary-model", type=str, default=None)
+    parser.add_argument("--fallback-model", type=str, default=None)
     parser.add_argument("--whisper-model", type=str, default="small", help="faster-whisper model size (default small)")
     parser.add_argument("--skip-existing", action="store_true", help="Reuse existing segment WAVs in out-dir")
     parser.add_argument("--no-whisper", action="store_true", help="Disable faster-whisper and use weighted timing")
@@ -532,8 +533,26 @@ def main() -> int:
         raise ValueError(f"Spec {spec_path} harus memiliki array `segments` (atau `scenes`) yang tidak kosong!")
 
     tts_cfg = spec.get("tts_config", {}) if isinstance(spec.get("tts_config"), dict) else {}
-    voice_name = str(args.voice or spec.get("voice") or tts_cfg.get("voice") or DEFAULT_VOICE)
-    vo_speed = float(args.vo_speed if args.vo_speed is not None else spec.get("vo_speed", DEFAULT_VO_SPEED))
+    sub_cfg = spec.get("subtitle_config", {}) if isinstance(spec.get("subtitle_config"), dict) else {}
+    voice_name = str(
+        args.voice
+        or spec.get("voice")
+        or tts_cfg.get("voice_name")
+        or tts_cfg.get("voice")
+        or DEFAULT_VOICE
+    )
+    if args.vo_speed is not None:
+        vo_speed = float(args.vo_speed)
+    elif spec.get("vo_speed") is not None:
+        vo_speed = float(spec["vo_speed"])
+    elif tts_cfg.get("vo_speed") is not None:
+        vo_speed = float(tts_cfg["vo_speed"])
+    else:
+        vo_speed = DEFAULT_VO_SPEED
+
+    primary_model = str(args.primary_model or tts_cfg.get("model") or DEFAULT_PRIMARY_MODEL)
+    fallback_model = str(args.fallback_model or tts_cfg.get("fallback_model") or DEFAULT_FALLBACK_MODEL)
+    margin_v = int(sub_cfg.get("margin_v") or 380)
 
     out_dir = Path(args.out_dir).resolve() if args.out_dir else (Path("/tmp/flow_v4_vo") / ep_id)
     raw_seg_dir = out_dir / "segments_raw"
@@ -550,7 +569,11 @@ def main() -> int:
 
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
 
-    log("VO_V4", f"Episode: {ep_id} | Spec: {spec_path.name} | Segments: {len(raw_segments)} | Voice: {voice_name} ({vo_speed}x)")
+    log(
+        "VO_V4",
+        f"Episode: {ep_id} | Spec: {spec_path.name} | Segments: {len(raw_segments)} | "
+        f"Model: {primary_model} | Voice: {voice_name} ({vo_speed}x)",
+    )
 
     manifest_segments: List[Dict[str, Any]] = []
     processed_wavs: List[Path] = []
@@ -559,6 +582,8 @@ def main() -> int:
 
     for idx, seg in enumerate(raw_segments, start=1):
         shot_id = int(seg.get("shot_id") or seg.get("scene_id") or seg.get("id") or idx)
+        segment_id = str(seg.get("segment_id") or f"seg_{shot_id:02d}")
+        shot_label = str(seg.get("shot_label") or "").strip()
         vo_text = str(seg.get("vo_text", "")).strip()
         if not vo_text:
             raise ValueError(f"Segment/shot {shot_id} memiliki `vo_text` kosong!")
@@ -567,11 +592,16 @@ def main() -> int:
             log("WARN", f"Shot {shot_id:02d} masih mengandung angka digit di `vo_text` — sebaiknya dieja lisan: {vo_text!r}")
 
         style_prompt = build_speech_metadata_style(spec, seg)
-        pause_after = float(seg.get("pause_after_sec", args.pad_sec))
+        if seg.get("post_silence_sec") is not None:
+            pause_after = float(seg["post_silence_sec"])
+        elif seg.get("pause_after_sec") is not None:
+            pause_after = float(seg["pause_after_sec"])
+        else:
+            pause_after = float(args.pad_sec)
         raw_wav = raw_seg_dir / f"shot_{shot_id:02d}_raw.wav"
         proc_wav = proc_seg_dir / f"shot_{shot_id:02d}_48k.wav"
 
-        model_used = "cached"
+        model_used = primary_model
         if args.skip_existing and raw_wav.exists() and raw_wav.stat().st_size > 1000:
             log("TTS", f"Shot {shot_id:02d}: reusing cached {raw_wav.name}")
         elif args.dry_run:
@@ -580,8 +610,8 @@ def main() -> int:
         else:
             audio_bytes, model_used = synthesize_gemini_tts(
                 client=client,
-                primary_model=args.primary_model,
-                fallback_model=args.fallback_model,
+                primary_model=primary_model,
+                fallback_model=fallback_model,
                 vo_text=vo_text,
                 style_prompt=style_prompt,
                 voice_name=voice_name,
@@ -638,19 +668,24 @@ def main() -> int:
         total_words += word_count
 
         seg_entry: Dict[str, Any] = {
+            "segment_id": segment_id,
             "shot_id": shot_id,
             "shot_filename": f"shot_{shot_id:02d}.mp4",
             "start_sec": start_sec,
             "end_sec": end_sec,
             "duration_sec": seg_dur,
             "speech_duration_sec": speech_dur,
+            "post_silence_sec": round(pause_after, 4),
             "pause_after_sec": round(pause_after, 4),
+            "recommended_flow_clip_sec": rec_flow_sec,
             "recommended_flow_duration_sec": rec_flow_sec,
             "vo_text": vo_text,
             "speech_metadata": {"style": style_prompt},
             "tts_model": model_used,
             "words": timed_words_global,
         }
+        if shot_label:
+            seg_entry["shot_label"] = shot_label
         if seg.get("visual_note"):
             seg_entry["visual_note"] = seg["visual_note"]
         if flow_warning:
@@ -666,15 +701,16 @@ def main() -> int:
         bgm_id = spec["bgm_plan"][0].get("bgm_id")
 
     manifest: Dict[str, Any] = {
-        "pipeline_version": "4.0-mobile-first-flow",
+        "pipeline_version": "4.2-mobile-first-flow",
         "episode_id": str(spec.get("episode_id") or ep_id.split("_")[0].upper()),
         "episode_slug": ep_id,
         "title": str(spec.get("title", ep_id)),
         "voice": voice_name,
         "vo_speed": vo_speed,
+        "subtitle_margin_v": margin_v,
         "total_words": total_words,
         "total_duration_sec": master_dur,
-        "recommended_total_flow_sec": sum(int(s["recommended_flow_duration_sec"]) for s in manifest_segments),
+        "recommended_total_flow_sec": sum(int(s["recommended_flow_clip_sec"]) for s in manifest_segments),
         "bgm_id": bgm_id or "",
         "vo_master_filename": "vo_master.wav",
         "subtitles_filename": "subtitles.ass",
@@ -692,20 +728,21 @@ def main() -> int:
     for s in manifest_segments:
         log(
             "FLOW_PLAN",
-            f"  {s['shot_filename']} | VO {s['start_sec']:5.2f}s–{s['end_sec']:5.2f}s "
-            f"(dur={s['duration_sec']:4.2f}s) -> Flow Omni Flash 1.2: {s['recommended_flow_duration_sec']}s | "
-            f"\"{s['vo_text'][:48]}\"",
+            f"  {s['segment_id']} ({s['shot_filename']}) | VO {s['start_sec']:5.2f}s–{s['end_sec']:5.2f}s "
+            f"(speech={s['speech_duration_sec']:4.2f}s + silence={s['post_silence_sec']:4.2f}s = {s['duration_sec']:4.2f}s) "
+            f"-> Flow Omni Flash 1.2: {s['recommended_flow_clip_sec']}s | \"{s['vo_text'][:48]}\"",
         )
 
     if not args.no_drive:
         ep_drive_id = ensure_drive_folder(ep_id, args.drive_episodes_folder)
         raw_clips_drive_id = ensure_drive_folder("raw_clips", ep_drive_id)
+        upload_or_update_drive_file(spec_path, ep_drive_id)
         upload_or_update_drive_file(vo_master_wav, ep_drive_id)
         upload_or_update_drive_file(manifest_path, ep_drive_id)
         upload_or_update_drive_file(ass_path, ep_drive_id)
         log(
             "DRIVE",
-            f"Synced 3 VO v4.0 artifacts -> Drive 04_episodes/{ep_id}/ (folder ID: {ep_drive_id} | "
+            f"Synced 4 VO v4.2 artifacts -> Drive 04_episodes/{ep_id}/ (folder ID: {ep_drive_id} | "
             f"raw_clips ID: {raw_clips_drive_id})",
         )
 

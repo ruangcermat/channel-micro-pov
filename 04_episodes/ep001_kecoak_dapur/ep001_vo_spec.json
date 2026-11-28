@@ -1,0 +1,81 @@
+{
+  "episode_id": "EP001",
+  "slug": "ep001_kecoak_dapur",
+  "title": "Tragedi Wastafel Jam 2 Pagi",
+  "universe": "Semesta Kosan",
+  "workflow_version": "4.2",
+  "word_count": 94,
+  "tts_config": {
+    "provider": "gemini_tts",
+    "api_version": "v1beta",
+    "model": "gemini-3.8-flash-tts",
+    "fallback_model": "gemini-3.8-flash-lite-tts",
+    "voice_name": "Fenrir",
+    "vo_speed": 1.08,
+    "strict_rule": "Kirim vo_text secara murni. Kirim speech_metadata.style secara terpisah dan JANGAN sertakan language_code atau field tambahan yang tidak didukung v1beta."
+  },
+  "subtitle_config": {
+    "engine": "faster-whisper",
+    "condition_on_previous_text": false,
+    "min_word_duration_sec": 0.015,
+    "margin_v": 380,
+    "top_badge_enabled": false
+  },
+  "drive_output_dir": "04_episodes/ep001_kecoak_dapur",
+  "segments": [
+    {
+      "segment_id": "seg_01",
+      "shot_label": "Shot 01 - Hook Wastafel",
+      "vo_text": "Jam dua pagi, lampu dapur nyala. Apesnya, kamu kecoak yang kepergok jilatin sisa mi di wastafel.",
+      "speech_metadata": {
+        "style": "Bahasa Indonesia natural teman nongkrong yang ekspresif. Pelan dan santai penuh rasa penasaran di tiga kata pertama, lalu mendadak kaget dan cepat dengan nada apes setelah kata nyala."
+      },
+      "post_silence_sec": 0.15
+    },
+    {
+      "segment_id": "seg_02",
+      "shot_label": "Shot 02 - Sandal Ijo & Sensor Angin",
+      "vo_text": "Mas kosan niatnya ambil minum, eh malah nyamber sandal ijo! Tapi santai, dua sensor angin di pantatmu udah nangkep ayunannya.",
+      "speech_metadata": {
+        "style": "Heboh, cepat, dan dramatis penuh kepanikan di kalimat pertama, lalu mendadak berubah santai, tengil, dan percaya diri mulai dari kata Tapi santai, dengan penekanan kocak pada kata pantatmu."
+      },
+      "post_silence_sec": 0.15
+    },
+    {
+      "segment_id": "seg_03",
+      "shot_label": "Shot 03 - Sprint Manjat Tembok",
+      "vo_text": "Lebih cepat dari kedipan mata, kakimu ngebut manjat tembok. Buat ukuranmu, setara tiga ratus kilometer per jam!",
+      "speech_metadata": {
+        "style": "Sangat cepat, bersemangat, memacu adrenalin seperti komentator balap, dengan penekanan antusias dan bangga pada tiga ratus kilometer per jam."
+      },
+      "post_silence_sec": 0.15
+    },
+    {
+      "segment_id": "seg_04",
+      "shot_label": "Shot 04 - Re-Hook Keramik Licin",
+      "vo_text": "Celah rak tinggal sejengkal, sialnya keramiknya licin minyak! Kakimu selip, sandalnya udah nyusul naik.",
+      "speech_metadata": {
+        "style": "Penuh harapan dan lega sepersekian detik di awal, lalu rem mendadak panik patah-patah penuh ketegangan mulai dari kata sialnya hingga akhir kalimat."
+      },
+      "post_silence_sec": 0.15
+    },
+    {
+      "segment_id": "seg_05",
+      "shot_label": "Shot 05 - Jurus Terlarang Buka Sayap",
+      "vo_text": "Kepepet. Sisa satu jurus terlarang: buka sayap. Aslinya kamu juga panik, nggak bisa nyetir, cuma meluncur ngawur.",
+      "speech_metadata": {
+        "style": "Pendek dan tegang di kata Kepepet, dramatis seperti film aksi di jurus terlarang buka sayap, lalu mendadak pecah menjadi nada jujur konyol dan blak-blakan di kalimat Aslinya kamu juga panik."
+      },
+      "post_silence_sec": 0.15
+    },
+    {
+      "segment_id": "seg_06",
+      "shot_label": "Shot 06 - Menukik & Hard-Cut Payoff",
+      "vo_text": "Masalahnya, di bawah persis ada muka dia. Maaf ya, bang.",
+      "speech_metadata": {
+        "style": "Menahan tawa agak usil di kalimat pertama, beri jeda sepersekian detik, lalu ucapkan Maaf ya, bang dengan nada super santai, polos, dan tengil."
+      },
+      "post_silence_sec": 1.2
+    }
+  ]
+}

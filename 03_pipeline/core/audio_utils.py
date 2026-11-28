@@ -167,27 +167,50 @@ def extract_word_timestamps(
         try:
             model = _get_whisper_model(model_size=model_size)
             audio_16k = _load_wav_mono_16k_float32(wav_path)
-            segments, _ = model.transcribe(
-                audio_16k,
-                language=language,
-                word_timestamps=True,
-                vad_filter=True,
-                condition_on_previous_text=False,
-                initial_prompt=vo_text,
-            )
-            extracted: List[Dict[str, Any]] = []
-            for seg in segments:
-                for w in getattr(seg, "words", None) or []:
-                    token = str(w.word).strip()
-                    if token:
-                        extracted.append(
-                            {
-                                "word": token,
-                                "start": round(float(w.start), 4),
-                                "end": round(float(w.end), 4),
-                            }
-                        )
-            extracted = _sanitize_whisper_words(extracted, script_words, raw_dur_sec=raw_dur)
+
+            def _run_whisper(use_vad: bool, prompt: Optional[str]) -> List[Dict[str, Any]]:
+                segments, _ = model.transcribe(
+                    audio_16k,
+                    language=language,
+                    word_timestamps=True,
+                    vad_filter=use_vad,
+                    condition_on_previous_text=False,
+                    initial_prompt=prompt,
+                )
+                out: List[Dict[str, Any]] = []
+                for seg in segments:
+                    for w in getattr(seg, "words", None) or []:
+                        token = str(w.word).strip()
+                        if token:
+                            out.append(
+                                {
+                                    "word": token,
+                                    "start": round(float(w.start), 4),
+                                    "end": round(float(w.end), 4),
+                                }
+                            )
+                return _sanitize_whisper_words(out, script_words, raw_dur_sec=raw_dur)
+
+            def _alignment_score(cands: List[Dict[str, Any]]) -> float:
+                if not cands or not script_words:
+                    return 0.0
+                norm_s = {re.sub(r"[^a-z0-9]", "", sw.lower()) for sw in script_words if sw}
+                norm_c = [re.sub(r"[^a-z0-9]", "", str(w["word"]).lower()) for w in cands]
+                overlap = sum(1 for tok in norm_c if tok and tok in norm_s) / float(max(1, len(script_words)))
+                len_ratio = min(len(cands), len(script_words)) / float(max(len(cands), len(script_words)))
+                return 0.65 * overlap + 0.35 * len_ratio
+
+            # Clean studio TTS WAVs have no background noise; disabling VAD prevents clipping fast/punchy openings!
+            extracted = _run_whisper(use_vad=False, prompt=vo_text)
+            if _alignment_score(extracted) < 0.65:
+                alt = _run_whisper(use_vad=False, prompt=None)
+                if _alignment_score(alt) > _alignment_score(extracted):
+                    extracted = alt
+            if _alignment_score(extracted) < 0.55:
+                alt_vad = _run_whisper(use_vad=True, prompt=vo_text)
+                if _alignment_score(alt_vad) > _alignment_score(extracted):
+                    extracted = alt_vad
+
             if extracted:
                 raw_words = extracted
                 cache_path.write_text(
@@ -221,14 +244,28 @@ def extract_word_timestamps(
                 t1 = min(t1, expected_dur_sec)
             adjusted.append({"word": sw, "start": round(t0, 4), "end": round(max(t0 + 0.05, t1), 4)})
     else:
-        # Proportional index alignment preserves exact Whisper speech pauses while keeping clean script text!
+        # Proportional alignment with smooth sub-bucket interpolation (strictly monotonic, zero overlapping timestamps!)
         n_s = max(1, len(script_words))
         n_r = len(raw_words)
-        for i, sw in enumerate(script_words):
+        bucket_groups: Dict[Tuple[int, int], List[int]] = {}
+        spans: List[Tuple[int, int]] = []
+        for i in range(n_s):
             r_idx0 = min(n_r - 1, int(math.floor(i * n_r / n_s)))
             r_idx1 = min(n_r - 1, max(r_idx0, int(math.floor((i + 1) * n_r / n_s)) - 1))
-            t0 = float(raw_words[r_idx0]["start"]) / spd
-            t1 = float(raw_words[r_idx1]["end"]) / spd
+            key = (r_idx0, r_idx1)
+            spans.append(key)
+            bucket_groups.setdefault(key, []).append(i)
+
+        for i, sw in enumerate(script_words):
+            r_idx0, r_idx1 = spans[i]
+            b_start = float(raw_words[r_idx0]["start"]) / spd
+            b_end = max(b_start + 0.05, float(raw_words[r_idx1]["end"]) / spd)
+            members = bucket_groups[(r_idx0, r_idx1)]
+            pos = members.index(i)
+            m_count = len(members)
+            sub_dur = (b_end - b_start) / float(m_count)
+            t0 = b_start + pos * sub_dur
+            t1 = b_start + (pos + 1) * sub_dur
             if expected_dur_sec:
                 t0 = min(t0, max(0.0, expected_dur_sec - 0.06))
                 t1 = min(t1, expected_dur_sec)

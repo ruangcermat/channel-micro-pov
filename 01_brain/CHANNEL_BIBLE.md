@@ -17,7 +17,7 @@
 ---
 
 ## 2. Gaya Bahasa & Standar Naskah (70–95 Kata | 30–42 Detik)
-- **Target Panjang & Ritme VO:** **70–95 kata** untuk durasi padat **30–42 detik** (ritme `gemini-3.8-flash-tts` suara **`Puck`**, `VO_SPEED = 1.08`). Padat tanpa basa-basi agar *Average Percentage Viewed (APV)* tembus > 95%.
+- **Target Panjang & Ritme VO:** **70–95 kata** untuk durasi padat **30–42 detik** (ritme `gemini-3.8-flash-tts` suara **`Fenrir`**, `VO_SPEED = 1.08`). Padat tanpa basa-basi agar *Average Percentage Viewed (APV)* tembus > 95%.
 - **Pemisahan Ketat `speech_metadata` vs `vo_text`:**
   - `vo_text` WAJIB berisi **murni ucapan lisan** — dilarang menyelipkan arahan akting/nada ke dalam `vo_text`. Semua arahan gaya bicara, tempo, dan emosi WAJIB dipisahkan ke `speech_metadata`.
   - **Wajib Eja Angka Lisan:** Semua angka di `vo_text` WAJIB dieja sebagai kata Indonesia alami (*"jam dua pagi"*, *"tiga ratus kilometer per jam"*, *"lima setengah sentimeter"* — BUKAN `02:00`, `300 km/jam`, atau `5,5 cm`).
@@ -58,7 +58,7 @@ Seluruh produksi episode (`EP001–EP100+`) mengikuti **5 Tahap Baku Audio-First
    - **Pass 3 (Ritme Lisan, Timecode & Logika Ruang):** Poles bahasa lisan padat 70–95 kata (eja semua angka), kunci **Visual Pattern Interrupt tiap 2–4d (`[0-3s]`, `[3-6s]`, ...)**, lolos *Mute Test*, dan audit logika ruang/lokalitas Indonesia.
    - **Pass 4 (Kompilasi VO Spec):** Hasilkan `04_episodes/<ep_id>/<ep_id>_vo_spec.json` berisi segmen `vo_text` murni ucapan lisan + `speech_metadata` terpisah.
 2. **Tahap 2 — Generate VO Utuh Audio-First di Antigravity Remote (`03_pipeline/generate_vo_v4.py`):**
-   - Panggil **`gemini-3.8-flash-tts`** (`Puck`, pisahkan arahan gaya bicara ke `speech_metadata`, `vo_text` murni ucapan lisan & angka dieja).
+   - Panggil **`gemini-3.8-flash-tts`** (`Fenrir`, pisahkan arahan gaya bicara ke `speech_metadata`, `vo_text` murni ucapan lisan & angka dieja).
    - Jalankan `faster-whisper` (`condition_on_previous_text=False`, anti-ekor nol-durasi) untuk menyusun **`vo_timing_manifest.json`** (durasi aktual tiap segmen + rekomendasi panjang klip Flow bulat ke atas **3–10 detik**) dan **`subtitles.ass`** (karaoke bawah, **TANPA top badge kuning**).
    - Simpan otomatis **`vo_master.wav`**, **`vo_timing_manifest.json`**, dan **`subtitles.ass`** ke Google Drive `04_episodes/epXXX/`.
 3. **Tahap 3 — Gerbang Tabel Scene Map (*Text Only*) → Paket Prompt Google Flow di Gemini:**
