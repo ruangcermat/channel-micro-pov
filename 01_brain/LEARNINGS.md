@@ -1,6 +1,6 @@
-# LEARNINGS — KITAB PELAJARAN & ATURAN PERMANEN JADI APA (v4.0)
+# LEARNINGS — KITAB PELAJARAN & ATURAN PERMANEN JADI APA (v4.2)
 
-File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setiap selesai audit 5 episode berdasarkan data di `PERFORMANCE_LOG.csv`. Setiap aturan di sini **WAJIB dipatuhi** pada semua episode **Arsitektur Mobile-First v4.0** (`EP001–EP100+`).
+File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setiap selesai audit 5 episode berdasarkan data di `PERFORMANCE_LOG.csv`. Setiap aturan di sini **WAJIB dipatuhi** pada semua episode **Arsitektur Mobile-First v4.2** (`EP001–EP100+`).
 
 ---
 
@@ -23,7 +23,7 @@ File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setia
 
 ---
 
-## B. Aturan Permanen Google Flow v4.0 (Mobile-First Omni Flash 1.2)
+## B. Aturan Permanen Google Flow v4.2 (Mobile-First Omni Flash 1.2)
 
 4. **(a) Kunci Stills 0-Kredit Dulu (Edit Start Frame untuk End Frame):**
    - Selalu generate dan ACC seluruh keyframe stills di **Nano Banana (0 kredit)** sebelum membakar kredit video.
@@ -49,14 +49,29 @@ File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setia
 10. **(g) Matikan Semua Top Badge Kuning:**
     - Seluruh *top badge* kuning (`on_screen_text`) di atas layar dimatikan permanen di `subtitles.ass` (`generate_vo_v4.py` & `assemble_flow_v4.py`) agar tidak pernah bertabrakan / teks ganda dengan subtitle karaoke bawah (`JAM 2 PAGI` vs `JAM DUA PAGI.`).
 
+11. **(h) Master Empty Location Kosong Tanpa Karakter + Deskripsi Ruang Identik Antar-Shot:**
+    - Sebelum merakit keyframe shot mana pun, wajib generate & kunci 1 still **Master Empty Location** (ruangan kosong 100% tanpa karakter di Nano Banana 0-kredit) sebagai jangkar tata ruang.
+    - Di seluruh prompt antar-shot dalam ruangan yang sama, WAJIB salin-tempel **deskripsi ruang yang 100% identik** (posisi pintu, warna dinding, pencahayaan, properti utama) agar latar diorama tidak berubah-ubah antar klip.
+
+12. **(i) Strategi `360p` Draft-First (`Outputs=1`) → `Omni Edit` di `360p` → Upscale `1080p` Gratis Hanya untuk *Keepers* `≤ 10s`:**
+    - DILARANG langsung generate banyak variasi (`Outputs > 1`) atau langsung merender resolusi tinggi.
+    - Selalu uji klip pertama di **`360p` dengan `Outputs = 1`** untuk memverifikasi gerak & akting. Jika ada cacat minor, perbaiki lewat **`Omni Edit` tetap di `360p`**. Baru lakukan **Upscale `1080p` gratis (0 kredit)** khusus untuk klip final (*Keepers*) yang berdurasi **`≤ 10 detik`**.
+
+13. **(j) *Planned Exit Transition* di Akhir Klip:**
+    - Setiap klip Flow WAJIB merancang ***Planned Exit Transition*** di 0,5–1 detik terakhir (mis. *whip-pan* cepat, *camera rush* ke objek/bayangan, pintu menutup, atau sapuan properti melewati lensa) agar sambungan potongan antar-shot di FFmpeg terasa menyatu, dinamis, dan tidak kaku.
+
+14. **(k) Hukum Maksimal 3 Percobaan + Pengingat Klik Ulang Picker `@` di Flow UI:**
+    - **Hukum Maksimal 3 Percobaan:** Jika sebuah shot gagal/aneh setelah **3 kali percobaan**, **STOP** membakar kredit — ganti sudut kamera, sederhanakan aksi, atau perbaiki keyframe still-nya di Nano Banana 0-kredit sebelum mencoba lagi.
+    - **Pengingat Klik Ulang Picker `@`:** Setiap kali menempel (*paste*) prompt atau mengulang generasi di Flow UI, WAJIB **klik ulang picker `@`** untuk memilih `@MasDimas` / ingredient terkait agar benar-benar terikat sebagai referensi visual aktif (bukan sekadar teks `@MasDimas` biasa!).
+
 ---
 
 ## Siklus Audit Performa: Menunggu Batch 1 (`EP001–EP005`)
 
 ### Hipotesis Awal yang Sedang Diuji di Batch 1:
-1. **Durasi Ideal:** 35–42 detik (**80–95 kata**) untuk mengejar *Average Percentage Viewed (APV)* > 95%.
-2. **Hook Paling Kuat:** Waktu/situasi spesifik Indonesia + visual *Tactile Matte Clay Diorama* + *Mute Test* di 2,5 detik pertama.
-3. **Pemicu Komentar:** Ending `hard_cut_punchline` / `seamless_loop` + *pinned comment* pertanyaan terbuka.
+1. **Durasi Ideal:** **30–42 detik (70–95 kata)** untuk mengejar *Average Percentage Viewed (APV)* > 95%.
+2. **Hook Paling Kuat:** Rotasi 4 Arketipe Hook + visual *Tactile Matte Clay Diorama* + *Mute Test* di 2,5 detik pertama.
+3. **Pemicu Share & Komentar:** Lolos **Tes Private Share WA/DM** + ending `hard_cut_punchline` / `seamless_loop` + *pinned comment* pertanyaan terbuka.
 
 ### Format Catatan Audit (Diisi Mulai Audit Batch 1):
 - **Yang Terbukti Berhasil (Pertahankan & Gandakan):** *(menunggu data 48 jam & 7 hari EP001–EP005)*
