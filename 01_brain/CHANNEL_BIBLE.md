@@ -17,9 +17,10 @@
 ---
 
 ## 2. Gaya Bahasa & Standar Naskah (70–95 Kata | 30–42 Detik)
-- **Target Panjang & Ritme VO:** **70–95 kata** untuk durasi padat **30–42 detik** (ritme `gemini-3.8-flash-tts` suara **`Fenrir`**, `VO_SPEED = 1.08`). Padat tanpa basa-basi agar *Average Percentage Viewed (APV)* tembus > 95%.
-- **Pemisahan Ketat `speech_metadata` vs `vo_text`:**
-  - `vo_text` WAJIB berisi **murni ucapan lisan** — dilarang menyelipkan arahan akting/nada ke dalam `vo_text`. Semua arahan gaya bicara, tempo, dan emosi WAJIB dipisahkan ke `speech_metadata`.
+- **Target Panjang & Ritme VO:** **70–95 kata** untuk durasi padat **30–42 detik** (ritme `gemini-3.8-flash-tts` suara permanen **`Fenrir`**, **`VO_SPEED = 1.02`** — dilarang menumpuk `VO_SPEED >= 1.08` dengan arahan "sangat cepat"). Padat tanpa basa-basi agar *Average Percentage Viewed (APV)* tembus > 95%.
+- **Pemisahan Ketat `speech_metadata` vs `vo_text` & Kalibrasi `Fenrir`:**
+  - `vo_text` WAJIB berisi **murni ucapan lisan** — dilarang menyelipkan arahan akting/nada ke dalam `vo_text`. Semua arahan gaya bicara, tempo, dan emosi WAJIB dipisahkan ke `speech_metadata.style` dengan arahan yang **membumi** (hindari lonjakan teatrikal, falsetto, atau perintah "sangat cepat" yang membuat kata tertelan).
+  - **Auto Verbatim & Speed QC Gate:** Setiap segmen WAJIB lolos audit mentah `faster-whisper` (`1.7–2.9 kata/detik`, kesamaan teks `≥ 0.82`, kata ganti POV seperti `kamu`/`kakimu`/`pantatmu`/`ukuranmu` 100% utuh) dan wajib hapus/timpa bersih file VO yang ditolak.
   - **Wajib Eja Angka Lisan:** Semua angka di `vo_text` WAJIB dieja sebagai kata Indonesia alami (*"jam dua pagi"*, *"tiga ratus kilometer per jam"*, *"lima setengah sentimeter"* — BUKAN `02:00`, `300 km/jam`, atau `5,5 cm`).
 - **Persona Narator:** Teman nongkrong yang cerdas, ekspresif, agak nyeleneh, dan jago mendramatisasi hal sepele. Wajib pakai kata **"kamu"** sejak detik pertama.
 - **Aturan Anti-Kaku:**
@@ -58,9 +59,9 @@ Seluruh produksi episode (`EP001–EP100+`) mengikuti **5 Tahap Baku Audio-First
    - **Pass 3 (Ritme Lisan, Timecode & Logika Ruang):** Poles bahasa lisan padat 70–95 kata (eja semua angka), kunci **Visual Pattern Interrupt tiap 2–4d (`[0-3s]`, `[3-6s]`, ...)**, lolos *Mute Test*, dan audit logika ruang/lokalitas Indonesia.
    - **Pass 4 (Kompilasi VO Spec):** Hasilkan `04_episodes/<ep_id>/<ep_id>_vo_spec.json` berisi segmen `vo_text` murni ucapan lisan + `speech_metadata` terpisah.
 2. **Tahap 2 — Generate VO Utuh Audio-First di Antigravity Remote (`03_pipeline/generate_vo_v4.py`):**
-   - Panggil **`gemini-3.8-flash-tts`** (`Fenrir`, pisahkan arahan gaya bicara ke `speech_metadata`, `vo_text` murni ucapan lisan & angka dieja).
+   - Panggil **`gemini-3.8-flash-tts`** (`Fenrir`, **`VO_SPEED = 1.02`**, pisahkan arahan gaya bicara membumi ke `speech_metadata.style`, `vo_text` murni ucapan lisan & angka dieja) lalu wajib lolos **Auto Verbatim & Speed QC Gate** (`faster-whisper` mentah `1.7–2.9 kata/detik`, kesamaan `≥ 0.82`, kata POV utuh, auto-retry hingga 2×).
    - Jalankan `faster-whisper` (`condition_on_previous_text=False`, anti-ekor nol-durasi) untuk menyusun **`vo_timing_manifest.json`** (durasi aktual tiap segmen + rekomendasi panjang klip Flow bulat ke atas **3–10 detik**) dan **`subtitles.ass`** (karaoke bawah, **TANPA top badge kuning**).
-   - Simpan otomatis **`vo_master.wav`**, **`vo_timing_manifest.json`**, dan **`subtitles.ass`** ke Google Drive `04_episodes/epXXX/`.
+   - Timpa bersih (nol duplikat) **`vo_master.wav`**, **`vo_timing_manifest.json`**, dan **`subtitles.ass`** ke Google Drive `04_episodes/epXXX/`.
 3. **Tahap 3 — Gerbang Tabel Scene Map (*Text Only*) → Paket Prompt Google Flow di Gemini:**
    - **GERBANG WAJIB — Tabel Scene Map (*Text Only*):** Setelah membaca `vo_timing_manifest.json` dari Drive, Gemini WAJIB menyajikan **Tabel Scene Map berbasis teks terlebih dahulu** (kolom: `Shot`, `Timecode [0-3s]`, `Durasi VO & Klip Flow ≤10s`, `Lokasi/Master Empty Location`, `Aksi & Visual Pattern Interrupt`, `Planned Exit Transition`, dan `Audio Foley Only`) untuk ditinjau/ACC user **SEBELUM** menulis paket prompt Flow!
    - **Flow Prompt Pack (Setelah Scene Map ACC):** Barulah Gemini mengeluarkan paket prompt **Tactile Matte Clay / Vinyl Diorama 3D** (Master Empty Location + karakter `@MasDimas` + keyframe stills Nano Banana 0-kredit + prompt klip Omni Flash 1.2) yang presisi sesuai durasi tiap segmen VO.

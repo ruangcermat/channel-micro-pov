@@ -21,6 +21,11 @@ File ini menyimpan aturan permanen hasil pelajaran produksi dan diperbarui setia
    - Jangan pernah membocorkan punchline ending lewat teks di awal shot terakhir.
    - Campurkan 3 layer audio secara seimbang (**VO `-6 dB`** dominan, native foley klip Flow `-10 dB` + *sidechain ducking*, BGM CC0 `-22 dB` + *sidechain ducking*, master **`-14 LUFS`**). Prompt klip Flow WAJIB meminta **foley only — tanpa musik, tanpa dialog, tanpa teks**.
 
+4. **Pelajaran Kalibrasi VO `Fenrir` (Pilot EP001 — Dilarang Terulang):**
+   - **Default Permanen `Fenrir` + `VO_SPEED = 1.02`:** Dilarang menumpuk `VO_SPEED >= 1.08` dengan frasa global `"ritme cepat"` atau arahan `"sangat cepat"` per segmen — penumpukan tempo membuat `Fenrir` melesat > `3.0 kata/detik` hingga menelan konsonan dan salah baca kata ganti POV (`"kakimu"` → `"kakinya"`, `"celah rak"` menyatu).
+   - **Arahan `speech_metadata.style` Membumi (Anti-Teatrikal & Anti-Falsetto):** Gunakan arahan akting yang natural, mengalir seperti teman nongkrong, dengan suara dada mantap untuk momen tegang — hindari kata pemancing nada teatrikal/melengking (`"heboh dramatis penuh kepanikan"`, `"patah-patah"`) agar `Fenrir` tidak melonjak falsetto atau memutus frasa secara kaku.
+   - **Wajib Lolos Auto Verbatim & Speed QC Gate + Clean Overwrite:** Setiap segmen WAV mentah WAJIB diaudit otomatis oleh `faster-whisper` (`condition_on_previous_text=False`, tanpa `initial_prompt`) terhadap `vo_text` dengan kecepatan bicara **`1.7–2.9 kata/detik`**, kesamaan teks `≥ 0.82`, dan verifikasi kata ganti POV (`kamu`, `kakimu`, `pantatmu`, `ukuranmu`, dst.). Segmen cacat wajib langsung dihapus & auto-retry hingga 2× dengan arahan artikulasi tenang, dan file master (`vo_master.wav`, `vo_timing_manifest.json`, `subtitles.ass`) selalu ditimpa bersih tanpa meninggalkan duplikat (`vo_master (1).wav`) di lokal maupun Google Drive.
+
 ---
 
 ## B. Aturan Permanen Google Flow v4.2 (Mobile-First Omni Flash 1.2)

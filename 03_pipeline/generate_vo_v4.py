@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from difflib import SequenceMatcher
 import json
 import math
 import os
@@ -44,6 +45,8 @@ for _p in (str(PIPELINE_DIR), str(SCRIPTS_DIR)):
         sys.path.insert(0, _p)
 
 from core.audio_utils import (  # noqa: E402
+    _get_whisper_model,
+    _load_wav_mono_16k_float32,
     build_vo_microfade_filter,
     extract_word_timestamps,
     group_timed_words_into_chunks,
@@ -52,10 +55,22 @@ from core.audio_utils import (  # noqa: E402
 DEFAULT_PRIMARY_MODEL = "gemini-3.8-flash-tts"
 DEFAULT_FALLBACK_MODEL = "gemini-3.8-flash-lite-tts"
 DEFAULT_VOICE = "Fenrir"
-DEFAULT_VO_SPEED = 1.08
+DEFAULT_VO_SPEED = 1.02
 DEFAULT_PAD_SEC = 0.06
 DEFAULT_SAMPLE_RATE = 24000
 DEFAULT_DRIVE_EPISODES_FOLDER_ID = "1RS6RuYzydBZodpaTVPKL97EAa2_jOGON"
+
+QC_MIN_WPS = 1.7
+QC_MAX_WPS = 2.9
+QC_MIN_SIMILARITY = 0.82
+QC_MAX_RETRIES = 2
+QC_RETRY_STYLE_SUFFIX = "Ucapkan lebih tenang dengan artikulasi sangat jelas per kata, jangan terburu-buru."
+
+POV_WATCH_WORDS = {
+    "kamu", "kakimu", "pantatmu", "ukuranmu", "tubuhmu", "kepalamu",
+    "sayapmu", "matamu", "tanganmu", "hidupmu", "punggungmu", "jantungmu",
+}
+NON_POV_MU_WORDS = {"ilmu", "tamu", "ketemu", "semu", "ramu", "jamu", "bertemu", "ditemu"}
 
 HIGHLIGHT_KEYWORDS = {
     "DUA", "PAGI", "KECOAK", "RAKSASA", "SANDAL", "JEPIT", "IJO", "CHEAT", "CODE",
@@ -85,7 +100,7 @@ def get_gemini_api_key() -> Optional[str]:
 
 
 # =============================================================================
-# GOOGLE DRIVE CLI HELPERS (`gdrive`)
+# GOOGLE DRIVE CLI HELPERS (`gdrive`) — CLEAN OVERWRITE (ZERO DUPLICATES!)
 # =============================================================================
 
 def _gdrive_json(args: List[str]) -> Any:
@@ -113,24 +128,182 @@ def ensure_drive_folder(name: str, parent_id: str) -> str:
 
 
 def upload_or_update_drive_file(local_path: Path, parent_id: str) -> str:
-    """Upload `local_path` to `parent_id`, updating in-place if a file with the same name already exists."""
+    """Clean-overwrite `local_path` in `parent_id` (updates in-place and trashes any duplicate copies)."""
     items = _gdrive_json(["readonly", "ls", parent_id])
-    existing_id: Optional[str] = None
+    exact_matches: List[Dict[str, Any]] = []
+    dup_matches: List[Dict[str, Any]] = []
+    dup_pattern = re.compile(
+        rf"^{re.escape(local_path.stem)}\s*\(\d+\){re.escape(local_path.suffix)}$",
+        flags=re.IGNORECASE,
+    )
     if isinstance(items, list):
         for item in items:
-            if item.get("name") == local_path.name and item.get("mimeType") != "application/vnd.google-apps.folder":
-                existing_id = str(item["id"])
-                break
+            if item.get("mimeType") == "application/vnd.google-apps.folder":
+                continue
+            name = str(item.get("name", ""))
+            if name == local_path.name:
+                exact_matches.append(item)
+            elif dup_pattern.match(name):
+                dup_matches.append(item)
 
-    if existing_id:
+    # Trash any numbered duplicate files (e.g. `vo_master (1).wav`) and extra exact-name duplicates
+    for dup in dup_matches:
+        _gdrive_json(["mutate", "trash", str(dup["id"])])
+        log("DRIVE", f"Trashed duplicate {dup.get('name')} (ID: {dup['id']})")
+
+    if len(exact_matches) > 1:
+        for extra in exact_matches[1:]:
+            _gdrive_json(["mutate", "trash", str(extra["id"])])
+            log("DRIVE", f"Trashed extra copy {extra.get('name')} (ID: {extra['id']})")
+
+    if exact_matches:
+        existing_id = str(exact_matches[0]["id"])
         _gdrive_json(["mutate", "update", existing_id, str(local_path)])
-        log("DRIVE", f"Updated {local_path.name} in-place (ID: {existing_id})")
+        log("DRIVE", f"Clean-overwrote {local_path.name} in-place (ID: {existing_id})")
         return existing_id
 
     res = _gdrive_json(["mutate", "upload", str(local_path), "--parent", parent_id])
     file_id = str(res.get("id", "")) if isinstance(res, dict) else ""
     log("DRIVE", f"Uploaded {local_path.name} (ID: {file_id})")
     return file_id
+
+
+# =============================================================================
+# AUTOMATED TTS VERBATIM & SPEED QC GATE (`faster-whisper` RAW AUDIT)
+# =============================================================================
+
+_ID_UNITS = ["nol", "satu", "dua", "tiga", "empat", "lima", "enam", "tujuh", "delapan", "sembilan"]
+
+
+def _int_to_indonesian(n: int) -> str:
+    if n < 0:
+        return "minus " + _int_to_indonesian(-n)
+    if n < 10:
+        return _ID_UNITS[n]
+    if n == 10:
+        return "sepuluh"
+    if n == 11:
+        return "sebelas"
+    if n < 20:
+        return f"{_ID_UNITS[n - 10]} belas"
+    if n < 100:
+        tens, rem = divmod(n, 10)
+        return f"{_ID_UNITS[tens]} puluh" + (f" {_int_to_indonesian(rem)}" if rem else "")
+    if n < 200:
+        rem = n - 100
+        return "seratus" + (f" {_int_to_indonesian(rem)}" if rem else "")
+    if n < 1000:
+        hundreds, rem = divmod(n, 100)
+        return f"{_ID_UNITS[hundreds]} ratus" + (f" {_int_to_indonesian(rem)}" if rem else "")
+    if n < 2000:
+        rem = n - 1000
+        return "seribu" + (f" {_int_to_indonesian(rem)}" if rem else "")
+    if n < 10000:
+        thousands, rem = divmod(n, 1000)
+        return f"{_ID_UNITS[thousands]} ribu" + (f" {_int_to_indonesian(rem)}" if rem else "")
+    return str(n)
+
+
+def _normalize_id_text_for_qc(text: str) -> str:
+    """Normalize Indonesian spoken text & Whisper raw output (digits/units -> spoken words) for verbatim QC."""
+    s = text.lower().replace("—", " ").replace("-", " ")
+    # Expand common unit abbreviations Whisper emits after digits (e.g. "300 km/jam" -> "300 kilometer per jam")
+    s = re.sub(r"\bkm\s*/\s*jam\b", "kilometer per jam", s)
+    s = re.sub(r"\bkm\b", "kilometer", s)
+    s = re.sub(r"\bcm\b", "sentimeter", s)
+    s = re.sub(r"\bmm\b", "milimeter", s)
+    s = re.sub(r"\bkg\b", "kilogram", s)
+    # Replace integers with Indonesian spoken words so Whisper digits match spelled-out vo_text
+    s = re.sub(r"\b\d{1,4}\b", lambda m: _int_to_indonesian(int(m.group(0))), s)
+    # Normalize common Indonesian informal spelling variants Whisper produces (without masking POV errors!)
+    s = re.sub(r"\b(gak|ga|ngga)\b", "nggak", s)
+    s = re.sub(r"\bmie\b", "mi", s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _extract_required_pov_words(vo_text: str) -> List[str]:
+    norm_tokens = _normalize_id_text_for_qc(vo_text).split()
+    req: List[str] = []
+    seen = set()
+    for tok in norm_tokens:
+        is_pov = (tok in POV_WATCH_WORDS) or (len(tok) >= 4 and tok.endswith("mu") and tok not in NON_POV_MU_WORDS)
+        if is_pov and tok not in seen:
+            req.append(tok)
+            seen.add(tok)
+    return req
+
+
+def run_segment_tts_qc(
+    raw_wav: Path,
+    vo_text: str,
+    vo_speed: float,
+    whisper_model_size: str = "small",
+    min_wps: float = QC_MIN_WPS,
+    max_wps: float = QC_MAX_WPS,
+    min_similarity: float = QC_MIN_SIMILARITY,
+) -> Dict[str, Any]:
+    """Audit raw TTS segment WAV via unbiased `faster-whisper` (`initial_prompt=None`, `condition_on_previous_text=False`)."""
+    raw_dur = measure_wav_duration(raw_wav)
+    spd = max(0.5, float(vo_speed))
+    effective_speech_dur = raw_dur / spd
+    word_count = max(1, len(vo_text.split()))
+    words_per_sec = round(word_count / max(0.1, effective_speech_dur), 2)
+    speed_ok = (min_wps <= words_per_sec <= max_wps)
+
+    model = _get_whisper_model(model_size=whisper_model_size)
+    audio_16k = _load_wav_mono_16k_float32(raw_wav)
+    segments, _ = model.transcribe(
+        audio_16k,
+        language="id",
+        word_timestamps=False,
+        vad_filter=False,
+        condition_on_previous_text=False,
+        initial_prompt=None,
+    )
+    raw_transcript = " ".join(str(seg.text).strip() for seg in segments if str(seg.text).strip()).strip()
+
+    norm_expected = _normalize_id_text_for_qc(vo_text)
+    norm_actual = _normalize_id_text_for_qc(raw_transcript)
+    similarity = round(SequenceMatcher(None, norm_expected, norm_actual).ratio(), 4)
+    similarity_ok = similarity >= min_similarity
+
+    required_pov = _extract_required_pov_words(vo_text)
+    actual_tokens = set(norm_actual.split())
+    missing_pov: List[str] = []
+    for w in required_pov:
+        found = w in actual_tokens
+        if not found and len(w) >= 4 and w.endswith("mu"):
+            # Whisper occasionally writes Indonesian possessive "-mu" separated (e.g. "kaki mu" vs "kakimu")
+            spaced = f"{w[:-2]} mu"
+            if re.search(rf"\b{re.escape(spaced)}\b", norm_actual):
+                found = True
+        if not found:
+            missing_pov.append(w)
+    pov_ok = len(missing_pov) == 0
+
+    reasons: List[str] = []
+    if words_per_sec > max_wps:
+        reasons.append(f"terlalu ngebut ({words_per_sec:.2f} > {max_wps:.1f} kata/detik)")
+    elif words_per_sec < min_wps:
+        reasons.append(f"terlalu lambat ({words_per_sec:.2f} < {min_wps:.1f} kata/detik)")
+    if not pov_ok:
+        reasons.append(f"kata POV hilang/salah baca: {', '.join(missing_pov)}")
+    if not similarity_ok:
+        reasons.append(f"kesamaan teks rendah ({similarity:.2f} < {min_similarity:.2f})")
+
+    return {
+        "passed": bool(speed_ok and similarity_ok and pov_ok),
+        "raw_transcript": raw_transcript,
+        "words_per_sec": words_per_sec,
+        "speed_ok": speed_ok,
+        "similarity": similarity,
+        "similarity_ok": similarity_ok,
+        "required_pov_words": required_pov,
+        "missing_pov_words": missing_pov,
+        "pov_ok": pov_ok,
+        "reasons": reasons,
+    }
 
 
 # =============================================================================
@@ -171,8 +344,8 @@ def build_speech_metadata_style(spec: Dict[str, Any], seg: Dict[str, Any]) -> st
     persona = str(
         spec.get("voice_persona")
         or tts_cfg.get("voice_persona")
-        or "Teman nongkrong Indonesia yang ekspresif, ritme cepat, artikulasi lisan natural dan jernih"
-    )
+        or "Teman nongkrong Indonesia yang ekspresif, santai, dan jernih artikulasinya"
+    ).rstrip(".")
     seg_meta = seg.get("speech_metadata")
     if isinstance(seg_meta, dict):
         delivery = str(seg_meta.get("style") or seg_meta.get("delivery") or "").strip()
@@ -186,7 +359,7 @@ def build_speech_metadata_style(spec: Dict[str, Any], seg: Dict[str, Any]) -> st
         f"Persona: {persona}.",
     ]
     if delivery:
-        parts.append(f"Delivery for this line: {delivery}.")
+        parts.append(f"Delivery for this line: {delivery.rstrip('.')}.")
     return " ".join(parts)
 
 
@@ -500,19 +673,31 @@ def concat_master_wav(seg_wavs: List[Path], out_master_wav: Path, ffmpeg_bin: st
     return out_master_wav
 
 
+def _qc_rank_key(qc: Dict[str, Any]) -> Tuple[int, int, int, float]:
+    """Ranking key to select the cleanest take if all retries still have minor QC issues."""
+    return (
+        1 if qc.get("passed") else 0,
+        1 if qc.get("pov_ok") else 0,
+        1 if qc.get("speed_ok") else 0,
+        float(qc.get("similarity", 0.0)),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mobile-First v4.2 Audio-First VO (`gemini-3.8-flash-tts`) + `faster-whisper` Timing Manifest + Karaoke ASS."
+        description="Mobile-First v4.2 Audio-First VO (`gemini-3.8-flash-tts`) + Automated Verbatim/Speed QC + `faster-whisper` Timing Manifest + Karaoke ASS."
     )
     parser.add_argument("--ep", type=str, default=None, help="Episode slug (e.g. ep001_kecoak_dapur)")
     parser.add_argument("--spec", type=str, default=None, help="Explicit path to <ep_id>_vo_spec.json")
     parser.add_argument("--out-dir", type=str, default=None, help="Local output directory (default /tmp/flow_v4_vo/<ep>)")
     parser.add_argument("--voice", type=str, default=None, help="Gemini TTS voice override (default Fenrir)")
-    parser.add_argument("--vo-speed", type=float, default=None, help="VO playback speed override (default 1.08)")
+    parser.add_argument("--vo-speed", type=float, default=None, help="VO playback speed override (default 1.02)")
     parser.add_argument("--pad-sec", type=float, default=DEFAULT_PAD_SEC, help="Default trailing pause per segment (s)")
     parser.add_argument("--primary-model", type=str, default=None)
     parser.add_argument("--fallback-model", type=str, default=None)
     parser.add_argument("--whisper-model", type=str, default="small", help="faster-whisper model size (default small)")
+    parser.add_argument("--qc-retries", type=int, default=QC_MAX_RETRIES, help="Max auto-retries when segment fails Verbatim/Speed QC (default 2)")
+    parser.add_argument("--no-qc", action="store_true", help="Skip Automated TTS Verbatim & Speed QC Gate")
     parser.add_argument("--skip-existing", action="store_true", help="Reuse existing segment WAVs in out-dir")
     parser.add_argument("--no-whisper", action="store_true", help="Disable faster-whisper and use weighted timing")
     parser.add_argument("--dry-run", action="store_true", help="Synthesize offline placeholder WAVs (0 API calls)")
@@ -560,6 +745,13 @@ def main() -> int:
     raw_seg_dir.mkdir(parents=True, exist_ok=True)
     proc_seg_dir.mkdir(parents=True, exist_ok=True)
 
+    # Clean Overwrite Policy (local): remove stale master artifacts before rebuilding
+    for stale_name in ("vo_master.wav", "vo_timing_manifest.json", "subtitles.ass"):
+        stale_file = out_dir / stale_name
+        if stale_file.exists():
+            stale_file.unlink()
+            log("CLEAN", f"Removed stale local artifact: {stale_file.name}")
+
     client = None
     if not args.dry_run:
         api_key = get_gemini_api_key()
@@ -569,10 +761,11 @@ def main() -> int:
 
         client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
 
+    qc_enabled = (not args.no_qc) and (not args.no_whisper) and (not args.dry_run)
     log(
         "VO_V4",
         f"Episode: {ep_id} | Spec: {spec_path.name} | Segments: {len(raw_segments)} | "
-        f"Model: {primary_model} | Voice: {voice_name} ({vo_speed}x)",
+        f"Model: {primary_model} | Voice: {voice_name} ({vo_speed}x) | QC Gate: {'ON' if qc_enabled else 'OFF'}",
     )
 
     manifest_segments: List[Dict[str, Any]] = []
@@ -602,22 +795,110 @@ def main() -> int:
         proc_wav = proc_seg_dir / f"shot_{shot_id:02d}_48k.wav"
 
         model_used = primary_model
+        qc_result: Optional[Dict[str, Any]] = None
+        qc_attempts = 0
+        final_style_used = style_prompt
+
         if args.skip_existing and raw_wav.exists() and raw_wav.stat().st_size > 1000:
             log("TTS", f"Shot {shot_id:02d}: reusing cached {raw_wav.name}")
+            if qc_enabled:
+                qc_result = run_segment_tts_qc(
+                    raw_wav=raw_wav,
+                    vo_text=vo_text,
+                    vo_speed=vo_speed,
+                    whisper_model_size=args.whisper_model,
+                )
+                qc_result["attempts"] = 0
+                qc_result["source"] = "cached"
         elif args.dry_run:
             generate_dry_run_wav(raw_wav, vo_text, shot_id)
             model_used = "dry_run"
         else:
-            audio_bytes, model_used = synthesize_gemini_tts(
-                client=client,
-                primary_model=primary_model,
-                fallback_model=fallback_model,
-                vo_text=vo_text,
-                style_prompt=style_prompt,
-                voice_name=voice_name,
+            max_tries = 1 + (max(0, int(args.qc_retries)) if qc_enabled else 0)
+            best_wav_bytes: Optional[bytes] = None
+            best_qc: Optional[Dict[str, Any]] = None
+            best_model = primary_model
+            best_style = style_prompt
+
+            for try_idx in range(1, max_tries + 1):
+                qc_attempts = try_idx
+                attempt_style = style_prompt if try_idx == 1 else f"{style_prompt} {QC_RETRY_STYLE_SUFFIX}"
+                # Delete any previous defective WAV / word cache before writing new take
+                raw_wav.unlink(missing_ok=True)
+                raw_wav.with_suffix(".words.json").unlink(missing_ok=True)
+
+                audio_bytes, model_used = synthesize_gemini_tts(
+                    client=client,
+                    primary_model=primary_model,
+                    fallback_model=fallback_model,
+                    vo_text=vo_text,
+                    style_prompt=attempt_style,
+                    voice_name=voice_name,
+                )
+                save_wav_bytes(raw_wav, audio_bytes)
+                log(
+                    "TTS",
+                    f"Shot {shot_id:02d} (try {try_idx}/{max_tries}): synthesized via {model_used} "
+                    f"({raw_wav.stat().st_size / 1024:.1f} KB)",
+                )
+
+                if not qc_enabled:
+                    final_style_used = attempt_style
+                    break
+
+                qc_curr = run_segment_tts_qc(
+                    raw_wav=raw_wav,
+                    vo_text=vo_text,
+                    vo_speed=vo_speed,
+                    whisper_model_size=args.whisper_model,
+                )
+                qc_curr["attempts"] = try_idx
+                qc_curr["source"] = "synthesized"
+
+                if best_qc is None or _qc_rank_key(qc_curr) > _qc_rank_key(best_qc):
+                    best_qc = qc_curr
+                    best_wav_bytes = raw_wav.read_bytes()
+                    best_model = model_used
+                    best_style = attempt_style
+
+                if qc_curr["passed"]:
+                    qc_result = qc_curr
+                    final_style_used = attempt_style
+                    break
+
+                reason_str = "; ".join(qc_curr["reasons"])
+                log(
+                    "QC_FAIL",
+                    f"{segment_id} try {try_idx}/{max_tries} GAGAL QC [{reason_str}] | "
+                    f"wps={qc_curr['words_per_sec']:.2f} | sim={qc_curr['similarity']:.2f} | "
+                    f"whisper={qc_curr['raw_transcript']!r}",
+                )
+                # Delete defective segment file before retrying
+                raw_wav.unlink(missing_ok=True)
+                raw_wav.with_suffix(".words.json").unlink(missing_ok=True)
+                if try_idx < max_tries:
+                    log("QC_RETRY", f"{segment_id}: menghapus WAV cacat & auto-retry ({try_idx + 1}/{max_tries}) dengan arahan artikulasi tenang...")
+
+            if qc_enabled and qc_result is None and best_wav_bytes is not None and best_qc is not None:
+                raw_wav.write_bytes(best_wav_bytes)
+                qc_result = best_qc
+                model_used = best_model
+                final_style_used = best_style
+                log(
+                    "QC_WARN",
+                    f"{segment_id}: masih belum 100% lolos setelah {max_tries} percobaan — memakai take terbaik "
+                    f"(wps={qc_result['words_per_sec']:.2f}, sim={qc_result['similarity']:.2f}, reasons={qc_result['reasons']})",
+                )
+
+        if qc_result is not None:
+            status_tag = "PASS" if qc_result["passed"] else "WARN"
+            pov_status = "OK" if qc_result["pov_ok"] else f"MISSING({','.join(qc_result['missing_pov_words'])})"
+            log(
+                "QC",
+                f"{segment_id} [{status_tag}] {qc_result['words_per_sec']:.2f} kata/detik | "
+                f"sim={qc_result['similarity']:.2f} | POV={pov_status} | "
+                f"asli={vo_text!r} | whisper={qc_result['raw_transcript']!r}",
             )
-            save_wav_bytes(raw_wav, audio_bytes)
-            log("TTS", f"Shot {shot_id:02d}: synthesized via {model_used} ({raw_wav.stat().st_size / 1024:.1f} KB)")
 
         speech_dur, seg_dur = _stitch_segment_to_48k_stereo(
             raw_wav,
@@ -666,6 +947,7 @@ def main() -> int:
         cursor_sec = end_sec
         word_count = len(vo_text.split())
         total_words += word_count
+        words_per_sec = round(word_count / max(0.1, speech_dur), 2)
 
         seg_entry: Dict[str, Any] = {
             "segment_id": segment_id,
@@ -677,15 +959,18 @@ def main() -> int:
             "speech_duration_sec": speech_dur,
             "post_silence_sec": round(pause_after, 4),
             "pause_after_sec": round(pause_after, 4),
+            "words_per_sec": words_per_sec,
             "recommended_flow_clip_sec": rec_flow_sec,
             "recommended_flow_duration_sec": rec_flow_sec,
             "vo_text": vo_text,
-            "speech_metadata": {"style": style_prompt},
+            "speech_metadata": {"style": final_style_used},
             "tts_model": model_used,
             "words": timed_words_global,
         }
         if shot_label:
             seg_entry["shot_label"] = shot_label
+        if qc_result is not None:
+            seg_entry["qc"] = qc_result
         if seg.get("visual_note"):
             seg_entry["visual_note"] = seg["visual_note"]
         if flow_warning:
@@ -726,11 +1011,13 @@ def main() -> int:
     log("VO_V4", f"Master VO ready : {vo_master_wav} ({master_dur:.2f}s, {total_words} words)")
     log("VO_V4", f"Timing Manifest : {manifest_path}")
     for s in manifest_segments:
+        qc_info = s.get("qc") or {}
+        qc_badge = "PASS" if qc_info.get("passed") else ("SKIP" if not qc_info else "WARN")
         log(
             "FLOW_PLAN",
             f"  {s['segment_id']} ({s['shot_filename']}) | VO {s['start_sec']:5.2f}s–{s['end_sec']:5.2f}s "
-            f"(speech={s['speech_duration_sec']:4.2f}s + silence={s['post_silence_sec']:4.2f}s = {s['duration_sec']:4.2f}s) "
-            f"-> Flow Omni Flash 1.2: {s['recommended_flow_clip_sec']}s | \"{s['vo_text'][:48]}\"",
+            f"(speech={s['speech_duration_sec']:4.2f}s + silence={s['post_silence_sec']:4.2f}s = {s['duration_sec']:4.2f}s, "
+            f"{s['words_per_sec']:.2f} wps, QC={qc_badge}) -> Flow: {s['recommended_flow_clip_sec']}s",
         )
 
     if not args.no_drive:
@@ -742,8 +1029,8 @@ def main() -> int:
         upload_or_update_drive_file(ass_path, ep_drive_id)
         log(
             "DRIVE",
-            f"Synced 4 VO v4.2 artifacts -> Drive 04_episodes/{ep_id}/ (folder ID: {ep_drive_id} | "
-            f"raw_clips ID: {raw_clips_drive_id})",
+            f"Synced 4 VO v4.2 artifacts (clean overwrite, 0 duplicates) -> Drive 04_episodes/{ep_id}/ "
+            f"(folder ID: {ep_drive_id} | raw_clips ID: {raw_clips_drive_id})",
         )
 
     return 0
